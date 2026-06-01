@@ -1,0 +1,17 @@
+{
+  "name": "opencode-pet",
+  "version": "0.2.0",
+  "private": true,
+  "description": "Tiny opencode pet menu bar app",
+  "main": "src/main.js",
+  "exports": {
+    "./server": "./src/plugin-server.cjs",
+    "./tui": "./src/plugin-tui.cjs"
+  },
+  "scripts": {
+    "start": "electron ."
+  },
+  "devDependencies": {
+    "electron": "^39.2.6"
+  }
+}
