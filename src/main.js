@@ -19,6 +19,7 @@ let server = null
 let events = []
 let sessionMap = new Map()
 let cleanupTimer = null
+let nextSessionSlot = 0
 
 function ensureDataDir() {
   fs.mkdirSync(DATA_DIR, { recursive: true })
@@ -117,10 +118,12 @@ function applySessionEvent(event) {
   if (event.type === "session.busy") {
     sessionMap.set(event.sessionID, {
       sessionID: event.sessionID,
+      slot: current?.slot ?? nextSessionSlot++,
       state: "busy",
       busyAt: current?.state === "busy" ? current.busyAt : now,
       idleAt: undefined,
       lastAt: now,
+      orbitTouchedAt: now,
       status: event.status || "busy",
     })
     return
@@ -129,10 +132,12 @@ function applySessionEvent(event) {
   if (event.type === "session.idle") {
     sessionMap.set(event.sessionID, {
       sessionID: event.sessionID,
+      slot: current?.slot ?? nextSessionSlot++,
       state: "idle",
       busyAt: current?.busyAt,
       idleAt: now,
       lastAt: now,
+      orbitTouchedAt: current?.orbitTouchedAt,
       status: event.status || "idle",
     })
   }
@@ -142,7 +147,8 @@ function pruneIdleSessions(refresh = true) {
   const now = Date.now()
   let changed = false
   for (const [sessionID, session] of sessionMap) {
-    if (session.state === "idle" && session.idleAt && now - session.idleAt > IDLE_TTL_MS) {
+    const expiresFrom = session.orbitTouchedAt || session.lastAt || session.idleAt
+    if (session.state === "idle" && expiresFrom && now - expiresFrom > IDLE_TTL_MS) {
       sessionMap.delete(sessionID)
       changed = true
     }
@@ -169,6 +175,8 @@ function getPetState() {
       busyAt: session.busyAt,
       idleAt: session.idleAt,
       lastAt: session.lastAt,
+      orbitTouchedAt: session.orbitTouchedAt,
+      slot: session.slot,
       index,
     })),
   }
@@ -286,7 +294,7 @@ function petHtml() {
       window.__PET_STATE = ${initialStateJson}
       const field = document.getElementById("field")
       const center = { x: 98, y: 100 }
-      const idleBase = { x: 184, y: 34 }
+      const orbit = { rx: 86, ry: 46, cruise: 1.9 }
       const dots = new Map()
       let lastFrame = performance.now()
       let snapshot = window.__PET_STATE || { sessions: [] }
@@ -295,11 +303,34 @@ function petHtml() {
         return current + (target - current) * factor
       }
 
-      function idleTarget(index) {
+      function wrapAngle(angle) {
+        while (angle <= -Math.PI) angle += Math.PI * 2
+        while (angle > Math.PI) angle -= Math.PI * 2
+        return angle
+      }
+
+      function moveAngleToward(current, target, step) {
+        const delta = wrapAngle(target - current)
+        if (Math.abs(delta) <= step) return target
+        return current + Math.sign(delta) * step
+      }
+
+      function slotAngle(slot) {
+        const row = Math.floor(slot / 2)
+        const sign = slot % 2 === 0 ? -1 : 1
+        const offset = Math.min(0.84, 0.18 + row * 0.2)
+        return sign * offset
+      }
+
+      function orbitPoint(angle) {
         return {
-          x: idleBase.x + (index % 2) * 8,
-          y: idleBase.y + index * 13,
+          x: center.x + Math.cos(angle) * orbit.rx,
+          y: center.y + Math.sin(angle) * orbit.ry,
         }
+      }
+
+      function stableTarget(slot) {
+        return orbitPoint(slotAngle(slot || 0))
       }
 
       function ensureDot(session, index) {
@@ -309,19 +340,21 @@ function petHtml() {
         el.className = "dot"
         el.title = session.sessionID
         field.appendChild(el)
-        const start = session.state === "busy" ? idleTarget(index) : idleTarget(index)
+        const slot = session.slot ?? index
+        const startAngle = slotAngle(slot)
+        const start = stableTarget(slot)
         dot = {
           id: session.sessionID,
           el,
-          x: start.x + 22,
+          x: start.x,
           y: start.y,
-          vx: 0,
-          vy: 0,
-          angle: -Math.PI / 2 + index * 0.9,
+          angle: startAngle,
+          speed: 0,
           alpha: 0,
-          scale: 0.72,
+          scale: 0.9,
           leaving: false,
           state: session.state,
+          parked: session.state !== "busy",
         }
         dots.set(session.sessionID, dot)
         return dot
@@ -340,39 +373,48 @@ function petHtml() {
       function tick(now) {
         const dt = Math.min(48, now - lastFrame) / 1000
         lastFrame = now
-        const busy = snapshot.sessions.filter((session) => session.state === "busy")
-        const idle = snapshot.sessions
-          .filter((session) => session.state === "idle")
-          .sort((a, b) => (b.idleAt || 0) - (a.idleAt || 0))
         const order = new Map()
-        busy.forEach((session, index) => order.set(session.sessionID, { kind: "busy", index }))
-        idle.forEach((session, index) => order.set(session.sessionID, { kind: "idle", index }))
+        snapshot.sessions.forEach((session, index) => order.set(session.sessionID, { kind: session.state, index, slot: session.slot ?? index }))
 
         for (const session of snapshot.sessions) ensureDot(session, order.get(session.sessionID)?.index || 0)
 
         for (const [id, dot] of dots) {
           const info = order.get(id)
-          let target = { x: dot.x + 26, y: dot.y }
-          let targetScale = 0.2
-          let targetAlpha = 0
+          let targetScale = 0.92
+          let targetAlpha = 0.9
 
-          if (!dot.leaving && info?.kind === "busy") {
-            const radius = 62 + (info.index % 3) * 13
-            dot.angle += dt * (1.85 - (info.index % 3) * 0.15)
-            target = {
-              x: center.x + Math.cos(dot.angle + info.index * 0.42) * radius,
-              y: center.y + Math.sin(dot.angle + info.index * 0.42) * radius,
-            }
+          if (dot.leaving || !info) {
+            dot.speed = ease(dot.speed, 0, 1 - Math.pow(0.001, dt))
+            targetScale = 0.2
+            targetAlpha = 0
+          } else if (info.kind === "busy") {
+            dot.parked = false
+            const targetSpeed = orbit.cruise + (info.slot % 3) * 0.13
+            dot.speed = ease(dot.speed, targetSpeed, 1 - Math.pow(0.08, dt))
+            dot.angle += dot.speed * dt
             targetScale = 1
             targetAlpha = 1
-          } else if (!dot.leaving && info?.kind === "idle") {
-            target = idleTarget(info.index)
-            targetScale = 0.9
-            targetAlpha = 0.88
+          } else {
+            const targetAngle = slotAngle(info.slot)
+            const delta = wrapAngle(targetAngle - dot.angle)
+            const absDelta = Math.abs(delta)
+            if (!dot.parked) {
+              const desiredSpeed = Math.max(0.18, Math.min(orbit.cruise, absDelta * 1.15))
+              dot.speed = ease(dot.speed, desiredSpeed, 1 - Math.pow(0.045, dt))
+              dot.angle = moveAngleToward(dot.angle, targetAngle, Math.max(0.01, dot.speed * dt))
+              if (absDelta < 0.018 && dot.speed < 0.28) {
+                dot.angle = targetAngle
+                dot.speed = 0
+                dot.parked = true
+              }
+            } else {
+              dot.angle = ease(dot.angle, targetAngle, 1 - Math.pow(0.01, dt))
+              dot.speed = ease(dot.speed, 0, 1 - Math.pow(0.01, dt))
+            }
           }
 
-          const stiffness = info?.kind === "busy" ? 0.105 : 0.13
-          const factor = 1 - Math.pow(1 - stiffness, dt * 60)
+          const target = orbitPoint(dot.angle)
+          const factor = 1 - Math.pow(0.06, dt)
           dot.x = ease(dot.x, target.x, factor)
           dot.y = ease(dot.y, target.y, factor)
           dot.scale = ease(dot.scale, targetScale, factor)
