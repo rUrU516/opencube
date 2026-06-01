@@ -19,7 +19,6 @@ let server = null
 let events = []
 let sessionMap = new Map()
 let cleanupTimer = null
-let nextSessionSlot = 0
 
 function ensureDataDir() {
   fs.mkdirSync(DATA_DIR, { recursive: true })
@@ -44,6 +43,25 @@ function writeState(extra = {}) {
 
 function shouldQuit(argv = process.argv) {
   return argv.includes("--quit") || argv.includes("--stop") || argv.includes("stop") || argv.includes("quit")
+}
+
+function randomBetween(min, max) {
+  return min + Math.random() * (max - min)
+}
+
+function createBounceDynamics() {
+  const bounds = { left: 42, top: 44, right: 154, bottom: 156 }
+  const half = 8
+  const speed = randomBetween(74, 122)
+  const angle = randomBetween(-Math.PI, Math.PI)
+  return {
+    x: randomBetween(bounds.left + half, bounds.right - half),
+    y: randomBetween(bounds.top + half, bounds.bottom - half),
+    vx: Math.cos(angle) * speed,
+    vy: Math.sin(angle) * speed,
+    speed,
+    bounds,
+  }
 }
 
 function createPetImage() {
@@ -118,12 +136,12 @@ function applySessionEvent(event) {
   if (event.type === "session.busy") {
     sessionMap.set(event.sessionID, {
       sessionID: event.sessionID,
-      slot: current?.slot ?? nextSessionSlot++,
       state: "busy",
       busyAt: current?.state === "busy" ? current.busyAt : now,
       idleAt: undefined,
       lastAt: now,
       orbitTouchedAt: now,
+      dynamics: current?.dynamics || createBounceDynamics(),
       status: event.status || "busy",
     })
     return
@@ -132,12 +150,12 @@ function applySessionEvent(event) {
   if (event.type === "session.idle") {
     sessionMap.set(event.sessionID, {
       sessionID: event.sessionID,
-      slot: current?.slot ?? nextSessionSlot++,
       state: "idle",
       busyAt: current?.busyAt,
       idleAt: now,
       lastAt: now,
       orbitTouchedAt: current?.orbitTouchedAt,
+      dynamics: current?.dynamics || createBounceDynamics(),
       status: event.status || "idle",
     })
   }
@@ -165,8 +183,7 @@ function getPetState() {
       height: 210,
       center: { x: 98, y: 100 },
       core: { x: 62, y: 64, size: 72 },
-      orbit: { baseRadius: 62, radiusStep: 13 },
-      idleStack: { x: 184, y: 34, yStep: 13, xJitter: 8 },
+      bounceBounds: { left: 42, top: 44, right: 154, bottom: 156 },
       dot: { size: 12 },
     },
     sessions: Array.from(sessionMap.values()).map((session, index) => ({
@@ -176,7 +193,7 @@ function getPetState() {
       idleAt: session.idleAt,
       lastAt: session.lastAt,
       orbitTouchedAt: session.orbitTouchedAt,
-      slot: session.slot,
+      dynamics: session.dynamics,
       index,
     })),
   }
@@ -272,16 +289,26 @@ function petHtml() {
         position: absolute;
         left: 0;
         top: 0;
-        width: 12px;
-        height: 12px;
-        margin-left: -6px;
-        margin-top: -6px;
-        border-radius: 999px;
-        background: #111;
-        border: 2px solid rgba(255,255,255,.95);
+        width: 16px;
+        height: 16px;
+        margin-left: -8px;
+        margin-top: -8px;
+        border-radius: 4px;
+        background: #050505;
+        border: 2px solid rgba(255,255,255,.92);
         box-sizing: border-box;
-        box-shadow: 0 2px 7px rgba(0,0,0,.22), 0 0 0 1px rgba(0,0,0,.14);
+        box-shadow: 0 2px 7px rgba(0,0,0,.24);
         will-change: transform, opacity;
+      }
+      .dot::before {
+        content: "";
+        position: absolute;
+        left: 4px;
+        top: 4px;
+        width: 4px;
+        height: 6px;
+        border-radius: 1px;
+        background: rgba(255,255,255,.92);
       }
     </style>
   </head>
@@ -293,8 +320,7 @@ function petHtml() {
     <script>
       window.__PET_STATE = ${initialStateJson}
       const field = document.getElementById("field")
-      const center = { x: 98, y: 100 }
-      const orbit = { rx: 86, ry: 46, cruise: 1.9 }
+      const physics = { bounds: { left: 42, top: 44, right: 154, bottom: 156 }, maxSpeed: 150, idleTtl: ${IDLE_TTL_MS} }
       const dots = new Map()
       let lastFrame = performance.now()
       let snapshot = window.__PET_STATE || { sessions: [] }
@@ -303,34 +329,8 @@ function petHtml() {
         return current + (target - current) * factor
       }
 
-      function wrapAngle(angle) {
-        while (angle <= -Math.PI) angle += Math.PI * 2
-        while (angle > Math.PI) angle -= Math.PI * 2
-        return angle
-      }
-
-      function moveAngleToward(current, target, step) {
-        const delta = wrapAngle(target - current)
-        if (Math.abs(delta) <= step) return target
-        return current + Math.sign(delta) * step
-      }
-
-      function slotAngle(slot) {
-        const row = Math.floor(slot / 2)
-        const sign = slot % 2 === 0 ? -1 : 1
-        const offset = Math.min(0.84, 0.18 + row * 0.2)
-        return sign * offset
-      }
-
-      function orbitPoint(angle) {
-        return {
-          x: center.x + Math.cos(angle) * orbit.rx,
-          y: center.y + Math.sin(angle) * orbit.ry,
-        }
-      }
-
-      function stableTarget(slot) {
-        return orbitPoint(slotAngle(slot || 0))
+      function clamp(value, min, max) {
+        return Math.max(min, Math.min(max, value))
       }
 
       function ensureDot(session, index) {
@@ -340,21 +340,21 @@ function petHtml() {
         el.className = "dot"
         el.title = session.sessionID
         field.appendChild(el)
-        const slot = session.slot ?? index
-        const startAngle = slotAngle(slot)
-        const start = stableTarget(slot)
+        const dynamics = session.dynamics || {}
         dot = {
           id: session.sessionID,
           el,
-          x: start.x,
-          y: start.y,
-          angle: startAngle,
-          speed: 0,
+          x: dynamics.x ?? 98,
+          y: dynamics.y ?? 100,
+          vx: dynamics.vx ?? 0,
+          vy: dynamics.vy ?? 95,
+          savedVx: dynamics.vx ?? 0,
+          savedVy: dynamics.vy ?? 95,
           alpha: 0,
-          scale: 0.9,
+          scale: 0.92,
           leaving: false,
           state: session.state,
-          parked: session.state !== "busy",
+          mode: session.state,
         }
         dots.set(session.sessionID, dot)
         return dot
@@ -374,7 +374,7 @@ function petHtml() {
         const dt = Math.min(48, now - lastFrame) / 1000
         lastFrame = now
         const order = new Map()
-        snapshot.sessions.forEach((session, index) => order.set(session.sessionID, { kind: session.state, index, slot: session.slot ?? index }))
+        snapshot.sessions.forEach((session, index) => order.set(session.sessionID, { kind: session.state, index, session }))
 
         for (const session of snapshot.sessions) ensureDot(session, order.get(session.sessionID)?.index || 0)
 
@@ -384,39 +384,59 @@ function petHtml() {
           let targetAlpha = 0.9
 
           if (dot.leaving || !info) {
-            dot.speed = ease(dot.speed, 0, 1 - Math.pow(0.001, dt))
+            dot.vx = ease(dot.vx, 0, 1 - Math.pow(0.001, dt))
+            dot.vy = ease(dot.vy, 0, 1 - Math.pow(0.001, dt))
             targetScale = 0.2
             targetAlpha = 0
           } else if (info.kind === "busy") {
-            dot.parked = false
-            const targetSpeed = orbit.cruise + (info.slot % 3) * 0.13
-            dot.speed = ease(dot.speed, targetSpeed, 1 - Math.pow(0.08, dt))
-            dot.angle += dot.speed * dt
+            if (dot.mode !== "busy") {
+              dot.vx = dot.savedVx || info.session?.dynamics?.vx || 0
+              dot.vy = dot.savedVy || info.session?.dynamics?.vy || 96
+              dot.mode = "busy"
+            }
+            const speed = Math.sqrt(dot.vx * dot.vx + dot.vy * dot.vy)
+            if (speed > physics.maxSpeed) {
+              dot.vx = (dot.vx / speed) * physics.maxSpeed
+              dot.vy = (dot.vy / speed) * physics.maxSpeed
+            }
+            dot.x += dot.vx * dt
+            dot.y += dot.vy * dt
+            const bounds = info.session?.dynamics?.bounds || physics.bounds
+            const half = 8
+            if (dot.x < bounds.left + half) {
+              dot.x = bounds.left + half
+              dot.vx = Math.abs(dot.vx)
+            } else if (dot.x > bounds.right - half) {
+              dot.x = bounds.right - half
+              dot.vx = -Math.abs(dot.vx)
+            }
+            if (dot.y < bounds.top + half) {
+              dot.y = bounds.top + half
+              dot.vy = Math.abs(dot.vy)
+            } else if (dot.y > bounds.bottom - half) {
+              dot.y = bounds.bottom - half
+              dot.vy = -Math.abs(dot.vy)
+            }
+            dot.savedVx = dot.vx
+            dot.savedVy = dot.vy
             targetScale = 1
             targetAlpha = 1
           } else {
-            const targetAngle = slotAngle(info.slot)
-            const delta = wrapAngle(targetAngle - dot.angle)
-            const absDelta = Math.abs(delta)
-            if (!dot.parked) {
-              const desiredSpeed = Math.max(0.18, Math.min(orbit.cruise, absDelta * 1.15))
-              dot.speed = ease(dot.speed, desiredSpeed, 1 - Math.pow(0.045, dt))
-              dot.angle = moveAngleToward(dot.angle, targetAngle, Math.max(0.01, dot.speed * dt))
-              if (absDelta < 0.018 && dot.speed < 0.28) {
-                dot.angle = targetAngle
-                dot.speed = 0
-                dot.parked = true
-              }
-            } else {
-              dot.angle = ease(dot.angle, targetAngle, 1 - Math.pow(0.01, dt))
-              dot.speed = ease(dot.speed, 0, 1 - Math.pow(0.01, dt))
+            if (dot.mode !== "idle") {
+              dot.savedVx = dot.vx
+              dot.savedVy = dot.vy
+              dot.vx = 0
+              dot.vy = 0
+              dot.mode = "idle"
             }
+            const expiresFrom = info.session?.orbitTouchedAt || info.session?.lastAt || info.session?.idleAt || Date.now()
+            const remaining = expiresFrom + physics.idleTtl - Date.now()
+            const fade = clamp(remaining / physics.idleTtl, 0, 1)
+            targetAlpha = 0.9 * fade
+            targetScale = 0.92
           }
 
-          const target = orbitPoint(dot.angle)
           const factor = 1 - Math.pow(0.06, dt)
-          dot.x = ease(dot.x, target.x, factor)
-          dot.y = ease(dot.y, target.y, factor)
           dot.scale = ease(dot.scale, targetScale, factor)
           dot.alpha = ease(dot.alpha, targetAlpha, factor)
           dot.el.style.transform = "translate3d(" + dot.x + "px, " + dot.y + "px, 0) scale(" + dot.scale + ")"
@@ -456,7 +476,10 @@ function restorePosition(win) {
   }
 
   const display = screen.getPrimaryDisplay().workArea
-  win.setPosition(display.x + display.width - 110, display.y + display.height - 130, false)
+  const bounds = win.getBounds()
+  const x = display.x + 24
+  const y = display.y + Math.round(display.height * 0.62 - bounds.height / 2)
+  win.setPosition(x, Math.max(display.y + 8, Math.min(y, display.y + display.height - bounds.height - 8)), false)
 }
 
 function createPetWindow() {
