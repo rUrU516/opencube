@@ -21,6 +21,7 @@ let petWindow = null
 let panelWindow = null
 let server = null
 let events = []
+let petSignals = []
 let sessionMap = new Map()
 let cleanupTimer = null
 
@@ -108,6 +109,16 @@ function recordEvent(event) {
     ...event,
   }
   applySessionEvent(item)
+  if (item.type === "hello" || item.type === "fancy_hello") {
+    petSignals.push({
+      id: item.id,
+      type: "hello",
+      mode: item.type === "fancy_hello" ? "fancy" : "single",
+      receivedAt: item.receivedAt,
+      sessionID: item.sessionID,
+    })
+    petSignals = petSignals.slice(-20)
+  }
   events.unshift(item)
   events = events.slice(0, MAX_EVENTS)
   updatePanel()
@@ -188,6 +199,7 @@ function getPetState() {
       idleIndex: session.state === "idle" ? idleIndex++ : undefined,
       color: DEFAULT_SESSION_COLORS[index % DEFAULT_SESSION_COLORS.length],
     })),
+    signals: petSignals,
   }
 }
 
@@ -561,6 +573,8 @@ function petHtml3D() {
       const faceOrder = ["front", "right", "top", "back", "left", "bottom"]
       const sessionFaceMap = new Map()
       const sessionColorMap = new Map()
+      const handledSignalIDs = new Set()
+      const faceFlashes = new Map()
       const colorReleaseSpeed = 90
       const faceMeshes = new Map()
       const glowMeshes = new Map()
@@ -805,6 +819,111 @@ function petHtml3D() {
         }))
       }
 
+      function chooseUnlitFace() {
+        const litFaces = new Set(sessionFaceMap.values())
+        const candidates = faceOrder.filter((faceName) => !litFaces.has(faceName) && !faceFlashes.has(faceName))
+        if (candidates.length === 0) return undefined
+        return randomChoice(candidates)
+      }
+
+      function processSignals(signals, now) {
+        for (const signal of signals || []) {
+          if (!signal?.id || handledSignalIDs.has(signal.id)) continue
+          handledSignalIDs.add(signal.id)
+          if (signal.type !== "hello") continue
+
+          if (signal.mode === "fancy") {
+            const litFaces = new Set(sessionFaceMap.values())
+            const candidates = faceOrder.filter((faceName) => !litFaces.has(faceName) && !faceFlashes.has(faceName))
+            for (const faceName of candidates) {
+              const burstCount = Math.floor(randomBetween(8, 15))
+              let cursor = randomBetween(0, 140)
+              const bursts = []
+              for (let index = 0; index < burstCount; index++) {
+                const duration = randomBetween(150, 300)
+                bursts.push({
+                  at: cursor,
+                  duration,
+                  color: randomSessionGlowColor(),
+                  peak: randomBetween(0.82, 1.24),
+                })
+                cursor += duration + randomBetween(35, 150)
+              }
+              faceFlashes.set(faceName, {
+                signalID: signal.id,
+                mode: "fancy",
+                startedAt: now,
+                duration: cursor + 260,
+                bursts,
+              })
+            }
+            continue
+          }
+
+          const faceName = chooseUnlitFace()
+          if (!faceName) continue
+          faceFlashes.set(faceName, {
+            signalID: signal.id,
+            mode: "single",
+            startedAt: now,
+            duration: 1320,
+            bursts: [{ at: 0, duration: 1320, color: randomSessionGlowColor(), peak: 1 }],
+          })
+        }
+
+        // Keep the handled set bounded; only the latest signals are sent by the host.
+        if (handledSignalIDs.size > 80) {
+          const liveIDs = new Set((signals || []).map((signal) => signal?.id).filter(Boolean))
+          for (const id of Array.from(handledSignalIDs)) {
+            if (!liveIDs.has(id)) handledSignalIDs.delete(id)
+          }
+        }
+      }
+
+      function applyFlashFaces(now) {
+        const litFaces = new Set(sessionFaceMap.values())
+        const active = {}
+        for (const [faceName, flash] of Array.from(faceFlashes.entries())) {
+          const elapsed = now - flash.startedAt
+          if (elapsed >= flash.duration || litFaces.has(faceName)) {
+            faceFlashes.delete(faceName)
+            continue
+          }
+
+          const progress = elapsed / flash.duration
+          let strength = 0
+          let color = undefined
+          for (const burst of flash.bursts || []) {
+            const burstElapsed = elapsed - burst.at
+            if (burstElapsed < 0 || burstElapsed > burst.duration) continue
+            const burstProgress = burstElapsed / burst.duration
+            const pulses = flash.mode === "single"
+              ? Math.sin(progress * Math.PI * 6)
+              : Math.sin(burstProgress * Math.PI)
+            const burstStrength = Math.max(0, pulses) * (burst.peak || 1) * (1 - progress * 0.08)
+            if (burstStrength > strength) {
+              strength = burstStrength
+              color = burst.color
+            }
+          }
+          if (strength <= 0.01) {
+            active[faceName] = { strength: 0, signalID: flash.signalID }
+            continue
+          }
+
+          const face = faceMeshes.get(faceName)
+          const glow = glowMeshes.get(faceName)
+          color ??= randomSessionGlowColor()
+          const threeColor = new THREE.Color(color.r / 255, color.g / 255, color.b / 255)
+          face.material.color.copy(threeColor).lerp(new THREE.Color(0xffffff), 0.70)
+          glow.material.color.setRGB(color.r / 255, color.g / 255, color.b / 255)
+          glow.material.opacity = 0.18 + strength * 0.82
+          glow.scale.setScalar(1.00 + strength * 0.32)
+          active[faceName] = { strength, signalID: flash.signalID }
+        }
+        return active
+      }
+
       window.__setPetState = setSnapshot
       window.__getPetDebug = () => latestDebug
 
@@ -851,6 +970,8 @@ function petHtml3D() {
         const glowG = Math.round(255 + (190 - 255) * glow)
         const glowB = Math.round(232 + (210 - 232) * glow)
         const busyFaces = syncBusyFaces(sessions, speed)
+        processSignals(snapshot.signals || [], now)
+        const helloFlashes = applyFlashFaces(now)
         renderCube()
         latestDebug = {
           now: Date.now(),
@@ -866,6 +987,7 @@ function petHtml3D() {
           glowColor: { r: glowR, g: glowG, b: glowB },
           faceRotations,
           busyFaces,
+          helloFlashes,
         }
         requestAnimationFrame(tick)
       }

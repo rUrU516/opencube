@@ -22,6 +22,10 @@ function isSayHello(input) {
   return input.command === "pet_say_hello"
 }
 
+function isFancySayHello(input) {
+  return input.command === "pet_fancy_say_hello"
+}
+
 async function injectNotice(client, sessionID, text) {
   if (!sessionID || !client?.session?.prompt) return
 
@@ -59,16 +63,20 @@ module.exports = {
         }
         cfg.command.pet_say_hello = {
           template: "/pet_say_hello",
-          description: "Send a hello test event to the desktop opencode pet inbox.",
+          description: "Send a hello test event to OpenCub.",
+        }
+        cfg.command.pet_fancy_say_hello = {
+          template: "/pet_fancy_say_hello",
+          description: "Trigger a randomized light show on OpenCub's free faces.",
         }
       },
 
       "command.execute.before": async (input) => {
-        if (!["pet", "pet_stop", "pet_say_hello"].includes(input.command)) return
+        if (!["pet", "pet_stop", "pet_say_hello", "pet_fancy_say_hello"].includes(input.command)) return
 
         if (shouldQuit(input)) {
           await quitPet()
-          await injectNotice(client, input.sessionID, "小宠物已收到关闭请求 🐾")
+          await injectNotice(client, input.sessionID, "OpenCub is going to sleep 🐾")
         } else if (isSayHello(input)) {
           await sendEvent({
             type: "hello",
@@ -78,10 +86,20 @@ module.exports = {
             sessionID: input.sessionID,
             source: "opencode-pet-plugin",
           })
-          await injectNotice(client, input.sessionID, "已发送 hello 到小宠物 inbox 🐾")
+          await injectNotice(client, input.sessionID, "OpenCub got your hello 🐾")
+        } else if (isFancySayHello(input)) {
+          await sendEvent({
+            type: "fancy_hello",
+            message: "fancy hello light show from opencode ✨",
+            command: input.command,
+            arguments: input.arguments,
+            sessionID: input.sessionID,
+            source: "opencode-pet-plugin",
+          })
+          await injectNotice(client, input.sessionID, "OpenCub is putting on a light show ✨")
         } else {
           await showPet()
-          await injectNotice(client, input.sessionID, "小宠物已启动 🐾")
+          await injectNotice(client, input.sessionID, "OpenCub is awake 🐾")
         }
 
         handled()
