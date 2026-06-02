@@ -616,6 +616,7 @@ function petHtml3D() {
       const faceOrder = ["front", "right", "top", "back", "left", "bottom"]
       const sessionFaceMap = new Map()
       const sessionColorMap = new Map()
+      const colorReleaseSpeed = 90
       let snapshot = window.__PET_STATE || { sessions: [] }
       let lastFrame = performance.now()
       let rotation = { x: -14, y: -28, z: 0 }
@@ -717,26 +718,37 @@ function petHtml3D() {
         snapshot = next || { sessions: [] }
       }
 
-      function syncBusyFaces(sessions) {
+      function syncBusyFaces(sessions, speed) {
         const busySessions = sessions
           .filter((session) => session.state === "busy" && typeof session.sessionID === "string")
           .sort((a, b) => (b.busyAt || b.lastAt || 0) - (a.busyAt || a.lastAt || 0))
         const busyIDs = busySessions.map((session) => session.sessionID)
         const busySet = new Set(busyIDs)
-        for (const sessionID of Array.from(sessionColorMap.keys())) {
-          if (!busySet.has(sessionID)) {
-            sessionColorMap.delete(sessionID)
+
+        if (busyIDs.length === 0) {
+          if (speed < colorReleaseSpeed) {
+            sessionFaceMap.clear()
+            sessionColorMap.clear()
+          }
+        } else {
+          for (const sessionID of Array.from(sessionColorMap.keys())) {
+            if (!busySet.has(sessionID)) sessionColorMap.delete(sessionID)
           }
         }
+
         for (const sessionID of busyIDs) {
           if (!sessionColorMap.has(sessionID)) {
             sessionColorMap.set(sessionID, randomSessionGlowColor())
           }
         }
-        sessionFaceMap.clear()
-        for (const [index, session] of busySessions.slice(0, faceOrder.length).entries()) {
-          sessionFaceMap.set(session.sessionID, faceOrder[index])
+
+        if (busyIDs.length > 0) {
+          sessionFaceMap.clear()
+          for (const [index, session] of busySessions.slice(0, faceOrder.length).entries()) {
+            sessionFaceMap.set(session.sessionID, faceOrder[index])
+          }
         }
+
         const faceColors = new Map()
         for (const [sessionID, faceName] of sessionFaceMap) {
           faceColors.set(faceName, sessionColorMap.get(sessionID) || randomSessionGlowColor())
@@ -772,7 +784,6 @@ function petHtml3D() {
         const sessions = snapshot.sessions || []
         const busyCount = sessions.filter((session) => session.state === "busy").length
         const isBusy = busyCount > 0
-        const busyFaces = syncBusyFaces(sessions)
 
         if (isBusy && !wasBusy) setNextTorque(now)
         if (isBusy && now >= nextTorqueAt) setNextTorque(now)
@@ -807,6 +818,7 @@ function petHtml3D() {
         cubeWrap.style.setProperty("--glow-r", String(glowR))
         cubeWrap.style.setProperty("--glow-g", String(glowG))
         cubeWrap.style.setProperty("--glow-b", String(glowB))
+        const busyFaces = syncBusyFaces(sessions, speed)
         renderCube()
         latestDebug = {
           now: Date.now(),
@@ -818,6 +830,7 @@ function petHtml3D() {
           speedRatio,
           nextTorqueAt,
           glow,
+          colorReleaseSpeed,
           glowColor: { r: glowR, g: glowG, b: glowB },
           faceRotations,
           busyFaces,
