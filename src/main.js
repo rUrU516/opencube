@@ -577,33 +577,20 @@ function petHtml3D() {
         -webkit-backface-visibility: visible;
         transform-style: preserve-3d;
       }
+      .face.is-lit {
+        filter:
+          drop-shadow(0 0 18px rgba(var(--session-glow-r, 31), var(--session-glow-g, 220), var(--session-glow-b, 205), .95))
+          brightness(1.30)
+          saturate(1.48);
+      }
       .front { transform: translateZ(21px) rotateZ(var(--face-rot, 0deg)); }
       .back { transform: rotateY(180deg) translateZ(21px) rotateZ(var(--face-rot, 0deg)); }
       .right { transform: rotateY(90deg) translateZ(21px) rotateZ(var(--face-rot, 0deg)); }
       .left { transform: rotateY(-90deg) translateZ(21px) rotateZ(var(--face-rot, 0deg)); }
       .top { transform: rotateX(90deg) translateZ(21px) rotateZ(var(--face-rot, 0deg)); }
       .bottom { transform: rotateX(-90deg) translateZ(21px) rotateZ(var(--face-rot, 0deg)); }
-      .fill-face {
-        position: absolute;
-        left: 50%;
-        top: 50%;
-        width: 24px;
-        height: 24px;
-        margin-left: -12px;
-        margin-top: -12px;
-        background: rgba(31, 220, 205, .34);
-        border-radius: 4px;
-        backface-visibility: visible;
-        -webkit-backface-visibility: visible;
-      }
-      .fill-front { transform: translateZ(12px); }
-      .fill-back { transform: rotateY(180deg) translateZ(12px); }
-      .fill-right { transform: rotateY(90deg) translateZ(12px); }
-      .fill-left { transform: rotateY(-90deg) translateZ(12px); }
-      .fill-top { transform: rotateX(90deg) translateZ(12px); }
-      .fill-bottom { transform: rotateX(-90deg) translateZ(12px); }
       .stage.has-busy .cube-wrap {
-        filter: drop-shadow(0 6px 8px rgba(0, 0, 0, .24)) drop-shadow(0 0 var(--glow-blur) rgba(var(--glow-r), var(--glow-g), var(--glow-b), var(--glow-alpha)));
+        filter: drop-shadow(0 6px 8px rgba(0, 0, 0, .24));
       }
     </style>
   </head>
@@ -611,12 +598,6 @@ function petHtml3D() {
     <div class="stage" title="opencode pet：拖拽移动，右键打开菜单">
       <div class="cube-wrap" aria-label="3D opencode pet">
         <div class="cube" id="cube">
-          <div class="fill-face fill-front"></div>
-          <div class="fill-face fill-back"></div>
-          <div class="fill-face fill-right"></div>
-          <div class="fill-face fill-left"></div>
-          <div class="fill-face fill-top"></div>
-          <div class="fill-face fill-bottom"></div>
           <img class="face front" data-face="front" src="${iconUrl}" draggable="false" />
           <img class="face back" data-face="back" src="${iconUrl}" draggable="false" />
           <img class="face right" data-face="right" src="${iconUrl}" draggable="false" />
@@ -632,6 +613,9 @@ function petHtml3D() {
       const cubeWrap = document.querySelector(".cube-wrap")
       const cube = document.getElementById("cube")
       const faces = Array.from(document.querySelectorAll(".face"))
+      const faceOrder = ["front", "right", "top", "back", "left", "bottom"]
+      const sessionFaceMap = new Map()
+      const sessionColorMap = new Map()
       let snapshot = window.__PET_STATE || { sessions: [] }
       let lastFrame = performance.now()
       let rotation = { x: -14, y: -28, z: 0 }
@@ -651,14 +635,46 @@ function petHtml3D() {
 
       function randomTorque() {
         return {
-          x: randomBetween(90, 260) * randomSign(),
-          y: randomBetween(180, 520) * randomSign(),
-          z: randomBetween(35, 160) * randomSign(),
+          x: randomBetween(45, 130) * randomSign(),
+          y: randomBetween(90, 260) * randomSign(),
+          z: randomBetween(18, 80) * randomSign(),
         }
       }
 
       function randomChoice(items) {
         return items[Math.floor(Math.random() * items.length)]
+      }
+
+      function hslToRgb(h, s, l) {
+        const c = (1 - Math.abs(2 * l - 1)) * s
+        const hp = h / 60
+        const x = c * (1 - Math.abs((hp % 2) - 1))
+        let r = 0
+        let g = 0
+        let b = 0
+        if (hp < 1) [r, g, b] = [c, x, 0]
+        else if (hp < 2) [r, g, b] = [x, c, 0]
+        else if (hp < 3) [r, g, b] = [0, c, x]
+        else if (hp < 4) [r, g, b] = [0, x, c]
+        else if (hp < 5) [r, g, b] = [x, 0, c]
+        else [r, g, b] = [c, 0, x]
+        const m = l - c / 2
+        return {
+          r: Math.round((r + m) * 255),
+          g: Math.round((g + m) * 255),
+          b: Math.round((b + m) * 255),
+        }
+      }
+
+      function randomSessionGlowColor() {
+        const hue = randomBetween(0, 360)
+        const saturation = randomBetween(0.68, 0.94)
+        const lightness = randomBetween(0.50, 0.66)
+        const rgb = hslToRgb(hue, saturation, lightness)
+        return {
+          ...rgb,
+          name: "random-" + Math.round(hue),
+        }
       }
 
       function makeFaceRotations() {
@@ -701,6 +717,45 @@ function petHtml3D() {
         snapshot = next || { sessions: [] }
       }
 
+      function syncBusyFaces(sessions) {
+        const busySessions = sessions
+          .filter((session) => session.state === "busy" && typeof session.sessionID === "string")
+          .sort((a, b) => (b.busyAt || b.lastAt || 0) - (a.busyAt || a.lastAt || 0))
+        const busyIDs = busySessions.map((session) => session.sessionID)
+        const busySet = new Set(busyIDs)
+        for (const sessionID of Array.from(sessionColorMap.keys())) {
+          if (!busySet.has(sessionID)) {
+            sessionColorMap.delete(sessionID)
+          }
+        }
+        for (const sessionID of busyIDs) {
+          if (!sessionColorMap.has(sessionID)) {
+            sessionColorMap.set(sessionID, randomSessionGlowColor())
+          }
+        }
+        sessionFaceMap.clear()
+        for (const [index, session] of busySessions.slice(0, faceOrder.length).entries()) {
+          sessionFaceMap.set(session.sessionID, faceOrder[index])
+        }
+        const faceColors = new Map()
+        for (const [sessionID, faceName] of sessionFaceMap) {
+          faceColors.set(faceName, sessionColorMap.get(sessionID) || randomSessionGlowColor())
+        }
+        for (const face of faces) {
+          const color = faceColors.get(face.dataset.face)
+          face.classList.toggle("is-lit", Boolean(color))
+          if (color) {
+            face.style.setProperty("--session-glow-r", String(color.r))
+            face.style.setProperty("--session-glow-g", String(color.g))
+            face.style.setProperty("--session-glow-b", String(color.b))
+          }
+        }
+        return Object.fromEntries(Array.from(sessionFaceMap.entries()).map(([sessionID, faceName]) => {
+          const color = sessionColorMap.get(sessionID) || randomSessionGlowColor()
+          return [sessionID, { face: faceName, color: color.name, rgb: [color.r, color.g, color.b] }]
+        }))
+      }
+
       window.__setPetState = setSnapshot
       window.__getPetDebug = () => latestDebug
 
@@ -717,6 +772,7 @@ function petHtml3D() {
         const sessions = snapshot.sessions || []
         const busyCount = sessions.filter((session) => session.state === "busy").length
         const isBusy = busyCount > 0
+        const busyFaces = syncBusyFaces(sessions)
 
         if (isBusy && !wasBusy) setNextTorque(now)
         if (isBusy && now >= nextTorqueAt) setNextTorque(now)
@@ -741,12 +797,13 @@ function petHtml3D() {
         rotation.z += angularVelocity.z * dt
 
         const speed = magnitude(angularVelocity)
-        const glow = Math.min(1, speed / 1400)
+        const speedRatio = Math.min(1, speed / 1400)
+        const glow = Math.pow(speedRatio, 2.3)
         const glowR = Math.round(92 + (0 - 92) * glow)
         const glowG = Math.round(255 + (190 - 255) * glow)
         const glowB = Math.round(232 + (210 - 232) * glow)
-        cubeWrap.style.setProperty("--glow-blur", (5 + glow * 10).toFixed(2) + "px")
-        cubeWrap.style.setProperty("--glow-alpha", (0.12 + glow * 0.22).toFixed(3))
+        cubeWrap.style.setProperty("--glow-blur", (8 + glow * 18).toFixed(2) + "px")
+        cubeWrap.style.setProperty("--glow-alpha", (0.20 + glow * 0.34).toFixed(3))
         cubeWrap.style.setProperty("--glow-r", String(glowR))
         cubeWrap.style.setProperty("--glow-g", String(glowG))
         cubeWrap.style.setProperty("--glow-b", String(glowB))
@@ -758,10 +815,12 @@ function petHtml3D() {
           angularVelocity: { ...angularVelocity },
           torque: { ...torque },
           speed,
+          speedRatio,
           nextTorqueAt,
           glow,
           glowColor: { r: glowR, g: glowG, b: glowB },
           faceRotations,
+          busyFaces,
         }
         requestAnimationFrame(tick)
       }
