@@ -3,6 +3,7 @@ const fs = require("node:fs")
 const http = require("node:http")
 const os = require("node:os")
 const path = require("node:path")
+const { pathToFileURL } = require("node:url")
 
 const { DEFAULT_SESSION_COLORS, pixelPetSvg } = require("./pixel-pet-reference.cjs")
 
@@ -11,6 +12,7 @@ const HOST = "127.0.0.1"
 const PORT = Number(process.env.OPENCODE_PET_PORT || 47832)
 const DATA_DIR = path.join(os.homedir(), ".local", "share", "opencode-pet")
 const STATE_FILE = path.join(DATA_DIR, "state.json")
+const PET_HTML_FILE = path.join(DATA_DIR, "pet.html")
 const ICON_PATH = process.env.OPENCODE_PET_ICON || path.join(__dirname, "..", "assets", "opencode-icon.png")
 const MAX_EVENTS = 100
 const IDLE_TTL_MS = 5 * 60 * 1000
@@ -516,6 +518,7 @@ function petHtml() {
 function petHtml3D() {
   const initialStateJson = JSON.stringify(getPetState()).replaceAll("<", "\\u003c")
   const iconUrl = createIconDataUrl()
+  const threeUrl = pathToFileURL(path.join(__dirname, "..", "node_modules", "three", "build", "three.module.js")).href
   return `<!doctype html>
 <html>
   <head>
@@ -536,87 +539,31 @@ function petHtml3D() {
         background: transparent;
         -webkit-app-region: drag;
         user-select: none;
-        perspective: 360px;
-        perspective-origin: 50% 45%;
       }
-      .cube-wrap {
-        position: absolute;
-        left: 50%;
-        top: 50%;
-        width: 62px;
-        height: 62px;
-        transform: translate(-50%, -50%);
-        transform-style: preserve-3d;
-        pointer-events: none;
-        --glow-blur: 0px;
-        --glow-alpha: 0;
-        --glow-r: 92;
-        --glow-g: 255;
-        --glow-b: 232;
-        filter: drop-shadow(0 6px 8px rgba(0, 0, 0, .20));
-      }
-      .cube {
-        position: absolute;
-        left: 50%;
-        top: 50%;
-        width: 36px;
-        height: 36px;
-        margin-left: -18px;
-        margin-top: -18px;
-        transform-style: preserve-3d;
-        will-change: transform;
-      }
-      .face {
+      #scene {
         position: absolute;
         inset: 0;
-        width: 42px;
-        height: 42px;
-        display: block;
-        object-fit: contain;
-        backface-visibility: visible;
-        -webkit-backface-visibility: visible;
-        transform-style: preserve-3d;
-      }
-      .face.is-lit {
-        filter:
-          drop-shadow(0 0 18px rgba(var(--session-glow-r, 31), var(--session-glow-g, 220), var(--session-glow-b, 205), .95))
-          brightness(1.30)
-          saturate(1.48);
-      }
-      .front { transform: translateZ(21px) rotateZ(var(--face-rot, 0deg)); }
-      .back { transform: rotateY(180deg) translateZ(21px) rotateZ(var(--face-rot, 0deg)); }
-      .right { transform: rotateY(90deg) translateZ(21px) rotateZ(var(--face-rot, 0deg)); }
-      .left { transform: rotateY(-90deg) translateZ(21px) rotateZ(var(--face-rot, 0deg)); }
-      .top { transform: rotateX(90deg) translateZ(21px) rotateZ(var(--face-rot, 0deg)); }
-      .bottom { transform: rotateX(-90deg) translateZ(21px) rotateZ(var(--face-rot, 0deg)); }
-      .stage.has-busy .cube-wrap {
-        filter: drop-shadow(0 6px 8px rgba(0, 0, 0, .24));
+        width: 100%;
+        height: 100%;
+        pointer-events: none;
       }
     </style>
   </head>
   <body>
     <div class="stage" title="opencode pet：拖拽移动，右键打开菜单">
-      <div class="cube-wrap" aria-label="3D opencode pet">
-        <div class="cube" id="cube">
-          <img class="face front" data-face="front" src="${iconUrl}" draggable="false" />
-          <img class="face back" data-face="back" src="${iconUrl}" draggable="false" />
-          <img class="face right" data-face="right" src="${iconUrl}" draggable="false" />
-          <img class="face left" data-face="left" src="${iconUrl}" draggable="false" />
-          <img class="face top" data-face="top" src="${iconUrl}" draggable="false" />
-          <img class="face bottom" data-face="bottom" src="${iconUrl}" draggable="false" />
-        </div>
-      </div>
+      <canvas id="scene" aria-label="3D opencode pet"></canvas>
     </div>
-    <script>
+    <script type="module">
+      import * as THREE from "${threeUrl}"
+
       window.__PET_STATE = ${initialStateJson}
       const stage = document.querySelector(".stage")
-      const cubeWrap = document.querySelector(".cube-wrap")
-      const cube = document.getElementById("cube")
-      const faces = Array.from(document.querySelectorAll(".face"))
       const faceOrder = ["front", "right", "top", "back", "left", "bottom"]
       const sessionFaceMap = new Map()
       const sessionColorMap = new Map()
       const colorReleaseSpeed = 90
+      const faceMeshes = new Map()
+      const glowMeshes = new Map()
       let snapshot = window.__PET_STATE || { sessions: [] }
       let lastFrame = performance.now()
       let rotation = { x: -14, y: -28, z: 0 }
@@ -625,6 +572,62 @@ function petHtml3D() {
       let nextTorqueAt = 0
       let wasBusy = false
       let latestDebug = { now: Date.now(), busy: 0, rotation, angularVelocity, torque, speed: 0, faceRotations: {} }
+
+      const canvas = document.getElementById("scene")
+      const scene = new THREE.Scene()
+      const camera = new THREE.PerspectiveCamera(34, 1, 0.1, 20)
+      camera.position.set(0, 0.04, 3.25)
+      const renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true })
+      renderer.setClearColor(0x000000, 0)
+      renderer.setPixelRatio(Math.min((window.devicePixelRatio || 1) * 1.5, 3))
+      renderer.outputColorSpace = THREE.SRGBColorSpace
+
+      const cubeGroup = new THREE.Group()
+      scene.add(cubeGroup)
+      const iconTexture = new THREE.TextureLoader().load("${iconUrl}")
+      iconTexture.colorSpace = THREE.SRGBColorSpace
+      iconTexture.generateMipmaps = false
+      iconTexture.minFilter = THREE.LinearFilter
+      iconTexture.magFilter = THREE.LinearFilter
+      iconTexture.anisotropy = 8
+      const iconMaterial = new THREE.MeshBasicMaterial({
+        map: iconTexture,
+        transparent: true,
+        alphaTest: 0.02,
+        side: THREE.DoubleSide,
+      })
+      const glowTexture = createGlowTexture()
+      const faceGeometry = new THREE.PlaneGeometry(0.60, 0.60)
+      const glowGeometry = new THREE.PlaneGeometry(1.18, 1.18)
+      const rad = THREE.MathUtils.degToRad
+
+      function createGlowTexture() {
+        const canvas = document.createElement("canvas")
+        canvas.width = 256
+        canvas.height = 256
+        const ctx = canvas.getContext("2d")
+        const gradient = ctx.createRadialGradient(128, 128, 4, 128, 128, 124)
+        gradient.addColorStop(0, "rgba(255,255,255,1)")
+        gradient.addColorStop(0.18, "rgba(255,255,255,1)")
+        gradient.addColorStop(0.46, "rgba(255,255,255,.62)")
+        gradient.addColorStop(0.80, "rgba(255,255,255,.22)")
+        gradient.addColorStop(1, "rgba(255,255,255,0)")
+        ctx.fillStyle = gradient
+        ctx.fillRect(0, 0, 256, 256)
+        const texture = new THREE.CanvasTexture(canvas)
+        texture.colorSpace = THREE.SRGBColorSpace
+        return texture
+      }
+
+      function resize() {
+        const width = Math.max(1, window.innerWidth)
+        const height = Math.max(1, window.innerHeight)
+        renderer.setSize(width, height, false)
+        camera.aspect = width / height
+        camera.updateProjectionMatrix()
+      }
+      window.addEventListener("resize", resize)
+      resize()
 
       function randomBetween(min, max) {
         return min + Math.random() * (max - min)
@@ -691,8 +694,36 @@ function petHtml3D() {
       }
 
       const faceRotations = makeFaceRotations()
-      for (const face of faces) {
-        face.style.setProperty("--face-rot", (faceRotations[face.dataset.face] || 0) + "deg")
+      createFace("front", [0, 0, 0.30], [0, 0, rad(faceRotations.front || 0)], [0, 0, 0.314])
+      createFace("back", [0, 0, -0.30], [0, Math.PI, rad(faceRotations.back || 0)], [0, 0, -0.314])
+      createFace("right", [0.30, 0, 0], [0, Math.PI / 2, rad(faceRotations.right || 0)], [0.314, 0, 0])
+      createFace("left", [-0.30, 0, 0], [0, -Math.PI / 2, rad(faceRotations.left || 0)], [-0.314, 0, 0])
+      createFace("top", [0, 0.30, 0], [-Math.PI / 2, 0, rad(faceRotations.top || 0)], [0, 0.314, 0])
+      createFace("bottom", [0, -0.30, 0], [Math.PI / 2, 0, rad(faceRotations.bottom || 0)], [0, -0.314, 0])
+
+      function createFace(name, position, rotation, glowPosition) {
+        const face = new THREE.Mesh(faceGeometry, iconMaterial.clone())
+        face.position.set(...position)
+        face.rotation.set(...rotation)
+        cubeGroup.add(face)
+        faceMeshes.set(name, face)
+
+        const glow = new THREE.Mesh(
+          glowGeometry,
+          new THREE.MeshBasicMaterial({
+            map: glowTexture,
+            color: 0x1fdccd,
+            transparent: true,
+            opacity: 0,
+            blending: THREE.AdditiveBlending,
+            depthWrite: false,
+            side: THREE.DoubleSide,
+          }),
+        )
+        glow.position.set(...glowPosition)
+        glow.rotation.set(...rotation)
+        cubeGroup.add(glow)
+        glowMeshes.set(name, glow)
       }
 
       function magnitude(vector) {
@@ -753,13 +784,19 @@ function petHtml3D() {
         for (const [sessionID, faceName] of sessionFaceMap) {
           faceColors.set(faceName, sessionColorMap.get(sessionID) || randomSessionGlowColor())
         }
-        for (const face of faces) {
-          const color = faceColors.get(face.dataset.face)
-          face.classList.toggle("is-lit", Boolean(color))
+        for (const faceName of faceOrder) {
+          const color = faceColors.get(faceName)
+          const face = faceMeshes.get(faceName)
+          const glow = glowMeshes.get(faceName)
           if (color) {
-            face.style.setProperty("--session-glow-r", String(color.r))
-            face.style.setProperty("--session-glow-g", String(color.g))
-            face.style.setProperty("--session-glow-b", String(color.b))
+            const threeColor = new THREE.Color(color.r / 255, color.g / 255, color.b / 255)
+            face.material.color.copy(threeColor).lerp(new THREE.Color(0xffffff), 0.58)
+            glow.material.color.setRGB(color.r / 255, color.g / 255, color.b / 255)
+            glow.material.opacity = 0.98
+            glow.scale.setScalar(1.24)
+          } else {
+            face.material.color.setRGB(1, 1, 1)
+            glow.material.opacity = 0
           }
         }
         return Object.fromEntries(Array.from(sessionFaceMap.entries()).map(([sessionID, faceName]) => {
@@ -772,10 +809,10 @@ function petHtml3D() {
       window.__getPetDebug = () => latestDebug
 
       function renderCube() {
-        cube.style.transform =
-          "rotateX(" + rotation.x.toFixed(3) + "deg) " +
-          "rotateY(" + rotation.y.toFixed(3) + "deg) " +
-          "rotateZ(" + rotation.z.toFixed(3) + "deg)"
+        cubeGroup.rotation.x = rad(rotation.x)
+        cubeGroup.rotation.y = rad(rotation.y)
+        cubeGroup.rotation.z = rad(rotation.z)
+        renderer.render(scene, camera)
       }
 
       function tick(now) {
@@ -813,11 +850,6 @@ function petHtml3D() {
         const glowR = Math.round(92 + (0 - 92) * glow)
         const glowG = Math.round(255 + (190 - 255) * glow)
         const glowB = Math.round(232 + (210 - 232) * glow)
-        cubeWrap.style.setProperty("--glow-blur", (8 + glow * 18).toFixed(2) + "px")
-        cubeWrap.style.setProperty("--glow-alpha", (0.20 + glow * 0.34).toFixed(3))
-        cubeWrap.style.setProperty("--glow-r", String(glowR))
-        cubeWrap.style.setProperty("--glow-g", String(glowG))
-        cubeWrap.style.setProperty("--glow-b", String(glowB))
         const busyFaces = syncBusyFaces(sessions, speed)
         renderCube()
         latestDebug = {
@@ -843,6 +875,12 @@ function petHtml3D() {
     </script>
   </body>
 </html>`
+}
+
+function writePetHtmlFile() {
+  ensureDataDir()
+  fs.writeFileSync(PET_HTML_FILE, petHtml3D(), "utf8")
+  return PET_HTML_FILE
 }
 
 function updatePet() {
@@ -890,7 +928,7 @@ function createPetWindow() {
     },
   })
   petWindow.setAlwaysOnTop(true, "floating")
-  petWindow.loadURL("data:text/html;charset=utf-8," + encodeURIComponent(petHtml3D()))
+  petWindow.loadFile(writePetHtmlFile())
   petWindow.webContents.on("context-menu", () => buildMenu().popup({ window: petWindow }))
   petWindow.on("moved", () => {
     const [x, y] = petWindow.getPosition()
