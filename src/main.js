@@ -559,10 +559,10 @@ function petHtml3D() {
         position: absolute;
         left: 50%;
         top: 50%;
-        width: 42px;
-        height: 42px;
-        margin-left: -21px;
-        margin-top: -21px;
+        width: 36px;
+        height: 36px;
+        margin-left: -18px;
+        margin-top: -18px;
         transform-style: preserve-3d;
         will-change: transform;
       }
@@ -587,21 +587,21 @@ function petHtml3D() {
         position: absolute;
         left: 50%;
         top: 50%;
-        width: 28px;
-        height: 28px;
-        margin-left: -14px;
-        margin-top: -14px;
-        background: rgba(12, 12, 11, .86);
-        border-radius: 6px;
+        width: 24px;
+        height: 24px;
+        margin-left: -12px;
+        margin-top: -12px;
+        background: rgba(31, 220, 205, .34);
+        border-radius: 4px;
         backface-visibility: visible;
         -webkit-backface-visibility: visible;
       }
-      .fill-front { transform: translateZ(14px); }
-      .fill-back { transform: rotateY(180deg) translateZ(14px); }
-      .fill-right { transform: rotateY(90deg) translateZ(14px); }
-      .fill-left { transform: rotateY(-90deg) translateZ(14px); }
-      .fill-top { transform: rotateX(90deg) translateZ(14px); }
-      .fill-bottom { transform: rotateX(-90deg) translateZ(14px); }
+      .fill-front { transform: translateZ(12px); }
+      .fill-back { transform: rotateY(180deg) translateZ(12px); }
+      .fill-right { transform: rotateY(90deg) translateZ(12px); }
+      .fill-left { transform: rotateY(-90deg) translateZ(12px); }
+      .fill-top { transform: rotateX(90deg) translateZ(12px); }
+      .fill-bottom { transform: rotateX(-90deg) translateZ(12px); }
       .stage.has-busy .cube-wrap {
         filter: drop-shadow(0 6px 8px rgba(0, 0, 0, .24)) drop-shadow(0 0 var(--glow-blur) rgba(var(--glow-r), var(--glow-g), var(--glow-b), var(--glow-alpha)));
       }
