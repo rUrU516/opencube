@@ -1,8 +1,10 @@
-const { app, BrowserWindow, Menu, nativeImage, screen } = require("electron")
+const { app, BrowserWindow, Menu, screen } = require("electron")
 const fs = require("node:fs")
 const http = require("node:http")
 const os = require("node:os")
 const path = require("node:path")
+
+const { DEFAULT_SESSION_COLORS, pixelPetSvg } = require("./pixel-pet-reference.cjs")
 
 const APP_NAME = "opencode pet"
 const HOST = "127.0.0.1"
@@ -62,23 +64,6 @@ function createBounceDynamics() {
     speed,
     bounds,
   }
-}
-
-function createPetImage() {
-  let image = nativeImage.createFromPath(ICON_PATH)
-  if (image.isEmpty()) {
-    image = nativeImage.createFromDataURL(
-      "data:image/svg+xml;charset=utf-8," +
-        encodeURIComponent(
-          `<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64"><rect width="64" height="64" rx="14" fill="#111"/><text x="32" y="42" text-anchor="middle" font-size="34" fill="white">oc</text></svg>`,
-        ),
-    )
-  }
-  return image.resize({ width: 72, height: 72 })
-}
-
-function createPetImageDataUrl() {
-  return createPetImage().toDataURL()
 }
 
 function json(res, status, body) {
@@ -165,7 +150,7 @@ function pruneIdleSessions(refresh = true) {
   const now = Date.now()
   let changed = false
   for (const [sessionID, session] of sessionMap) {
-    const expiresFrom = session.orbitTouchedAt || session.lastAt || session.idleAt
+    const expiresFrom = session.idleAt || session.lastAt
     if (session.state === "idle" && expiresFrom && now - expiresFrom > IDLE_TTL_MS) {
       sessionMap.delete(sessionID)
       changed = true
@@ -176,15 +161,17 @@ function pruneIdleSessions(refresh = true) {
 
 function getPetState() {
   pruneIdleSessions(false)
+  let busyIndex = 0
+  let idleIndex = 0
   return {
     now: Date.now(),
     layout: {
-      width: 230,
-      height: 210,
-      center: { x: 98, y: 100 },
-      core: { x: 62, y: 64, size: 72 },
-      bounceBounds: { left: 42, top: 44, right: 154, bottom: 156 },
-      dot: { size: 12 },
+      width: 256,
+      height: 256,
+      bodyViewBox: { width: 256, height: 256 },
+      busyJuggle: { centerX: 108, baseY: 82, radiusX: 48, liftY: 58 },
+      idlePile: { x: 194, y: 186, stepX: 17, stepY: 15, columns: 2 },
+      ball: { size: 14 },
     },
     sessions: Array.from(sessionMap.values()).map((session, index) => ({
       sessionID: session.sessionID,
@@ -195,6 +182,9 @@ function getPetState() {
       orbitTouchedAt: session.orbitTouchedAt,
       dynamics: session.dynamics,
       index,
+      busyIndex: session.state === "busy" ? busyIndex++ : undefined,
+      idleIndex: session.state === "idle" ? idleIndex++ : undefined,
+      color: DEFAULT_SESSION_COLORS[index % DEFAULT_SESSION_COLORS.length],
     })),
   }
 }
@@ -206,6 +196,16 @@ function escapeHtml(value) {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#39;")
+}
+
+function createIconDataUrl() {
+  try {
+    const png = fs.readFileSync(ICON_PATH)
+    return `data:image/png;base64,${png.toString("base64")}`
+  } catch {
+    const fallback = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96"><rect width="96" height="96" rx="20" fill="#111"/><rect x="30" y="18" width="36" height="60" fill="#f4f4ef"/><rect x="40" y="32" width="16" height="32" fill="#050505"/></svg>`
+    return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(fallback)}`
+  }
 }
 
 function panelHtml() {
@@ -248,8 +248,9 @@ function updatePanel() {
 }
 
 function petHtml() {
-  const iconDataUrl = createPetImageDataUrl()
+  const petBodySvg = pixelPetSvg({ sessionCount: 0, showCaption: false })
   const initialStateJson = JSON.stringify(getPetState()).replaceAll("<", "\\u003c")
+  const colorJson = JSON.stringify(DEFAULT_SESSION_COLORS)
   return `<!doctype html>
 <html>
   <head>
@@ -270,60 +271,86 @@ function petHtml() {
         background: transparent;
         -webkit-app-region: drag;
         user-select: none;
+        image-rendering: pixelated;
       }
-      #field {
+      .pet-art {
+        position: absolute;
+        inset: 0;
+        width: 256px;
+        height: 256px;
+        transform-origin: 106px 156px;
+        transition: transform 120ms steps(2, end), filter 120ms steps(2, end);
+      }
+      .pet-art svg {
+        display: block;
+        width: 256px;
+        height: 256px;
+        shape-rendering: crispEdges;
+      }
+      .stage.has-busy .pet-art {
+        animation: pet-work-bob 620ms steps(2, end) infinite;
+        filter: drop-shadow(0 4px 0 rgba(0,0,0,.14));
+      }
+      #ball-layer {
         position: absolute;
         inset: 0;
         pointer-events: none;
       }
-      .core {
-        position: absolute;
-        left: 62px;
-        top: 64px;
-        width: 72px;
-        height: 72px;
-        border-radius: 18px;
-      }
-      img { width: 100%; height: 100%; border-radius: inherit; pointer-events: none; }
-      .dot {
+      .session-ball-runtime {
         position: absolute;
         left: 0;
         top: 0;
-        width: 16px;
-        height: 16px;
-        margin-left: -8px;
-        margin-top: -8px;
-        border-radius: 4px;
-        background: #050505;
-        border: 2px solid rgba(255,255,255,.92);
+        width: 14px;
+        height: 14px;
+        margin-left: -7px;
+        margin-top: -7px;
         box-sizing: border-box;
-        box-shadow: 0 2px 7px rgba(0,0,0,.24);
+        background: var(--ball-color, #ff5d73);
+        box-shadow: 0 3px 0 rgba(0,0,0,.32);
+        image-rendering: pixelated;
         will-change: transform, opacity;
       }
-      .dot::before {
+      .session-ball-runtime::before {
         content: "";
         position: absolute;
         left: 4px;
-        top: 4px;
+        top: 2px;
         width: 4px;
-        height: 6px;
-        border-radius: 1px;
-        background: rgba(255,255,255,.92);
+        height: 4px;
+        background: rgba(255,255,255,.72);
+      }
+      .session-ball-runtime.busy {
+        z-index: 3;
+      }
+      .session-ball-runtime.idle {
+        z-index: 1;
+        box-shadow: 0 2px 0 rgba(0,0,0,.2);
+      }
+      @keyframes pet-work-bob {
+        0%, 100% { transform: translateY(0); }
+        50% { transform: translateY(-4px); }
       }
     </style>
   </head>
   <body>
     <div class="stage" title="opencode pet：拖拽移动，右键打开菜单">
-      <div class="core"><img src="${iconDataUrl}" /></div>
-      <div id="field"></div>
+      <div class="pet-art" aria-label="pixel opencode pet">${petBodySvg}</div>
+      <div id="ball-layer"></div>
     </div>
     <script>
       window.__PET_STATE = ${initialStateJson}
-      const field = document.getElementById("field")
-      const physics = { bounds: { left: 42, top: 44, right: 154, bottom: 156 }, maxSpeed: 150, idleTtl: ${IDLE_TTL_MS} }
-      const dots = new Map()
+      const SESSION_COLORS = ${colorJson}
+      const stage = document.querySelector(".stage")
+      const layer = document.getElementById("ball-layer")
+      const physics = {
+        idleTtl: ${IDLE_TTL_MS},
+        busy: { leftHandX: 30, rightHandX: 184, handY: 112, peakY: 34, stepPx: 2, periodMs: 1180 },
+        idlePile: { x: 194, y: 188, stepX: 17, stepY: 15, columns: 2 },
+      }
+      const balls = new Map()
       let lastFrame = performance.now()
       let snapshot = window.__PET_STATE || { sessions: [] }
+      let latestDebug = { now: Date.now(), busy: 0, idle: 0, balls: [] }
 
       function ease(current, target, factor) {
         return current + (target - current) * factor
@@ -333,124 +360,331 @@ function petHtml() {
         return Math.max(min, Math.min(max, value))
       }
 
-      function ensureDot(session, index) {
-        let dot = dots.get(session.sessionID)
-        if (dot) return dot
+      function snapPixel(value) {
+        return Math.round(value / physics.busy.stepPx) * physics.busy.stepPx
+      }
+
+      function colorFor(session, index) {
+        return session.color || SESSION_COLORS[index % SESSION_COLORS.length]
+      }
+
+      function ensureBall(session, index) {
+        let ball = balls.get(session.sessionID)
+        if (ball) {
+          ball.el.style.setProperty("--ball-color", colorFor(session, index))
+          return ball
+        }
         const el = document.createElement("div")
-        el.className = "dot"
+        el.className = "session-ball-runtime"
         el.title = session.sessionID
-        field.appendChild(el)
-        const dynamics = session.dynamics || {}
-        dot = {
+        el.style.setProperty("--ball-color", colorFor(session, index))
+        layer.appendChild(el)
+        ball = {
           id: session.sessionID,
           el,
-          x: dynamics.x ?? 98,
-          y: dynamics.y ?? 100,
-          vx: dynamics.vx ?? 0,
-          vy: dynamics.vy ?? 95,
-          savedVx: dynamics.vx ?? 0,
-          savedVy: dynamics.vy ?? 95,
+          x: 108,
+          y: 86,
           alpha: 0,
-          scale: 0.92,
+          scale: 0.86,
           leaving: false,
           state: session.state,
-          mode: session.state,
         }
-        dots.set(session.sessionID, dot)
-        return dot
+        balls.set(session.sessionID, ball)
+        return ball
       }
 
       function setSnapshot(next) {
         snapshot = next || { sessions: [] }
         const live = new Set(snapshot.sessions.map((session) => session.sessionID))
-        for (const dot of dots.values()) {
-          if (!live.has(dot.id)) dot.leaving = true
+        for (const ball of balls.values()) {
+          if (!live.has(ball.id)) ball.leaving = true
         }
       }
 
       window.__setPetState = setSnapshot
+      window.__getPetDebug = () => latestDebug
+
+      function busyTarget(busyIndex, busyCount, now) {
+        const count = Math.max(1, busyCount)
+        const cycle = now / physics.busy.periodMs + busyIndex / count
+        const halfCycle = Math.floor(cycle)
+        const t = cycle - halfCycle
+        const leftToRight = halfCycle % 2 === 0
+        const fromX = leftToRight ? physics.busy.leftHandX : physics.busy.rightHandX
+        const toX = leftToRight ? physics.busy.rightHandX : physics.busy.leftHandX
+        const handY = physics.busy.handY
+        const peakLift = handY - physics.busy.peakY
+        const arc = 4 * t * (1 - t)
+        const laneOffset = (busyIndex - (count - 1) / 2) * Math.min(8, 2 + count * 2)
+        const catchDip = Math.abs(t - 0.5) > 0.43 ? 4 : 0
+        return {
+          x: snapPixel(fromX + (toX - fromX) * t + laneOffset),
+          y: snapPixel(handY - arc * peakLift + catchDip),
+        }
+      }
+
+      function idleTarget(idleIndex) {
+        const col = idleIndex % physics.idlePile.columns
+        const row = Math.floor(idleIndex / physics.idlePile.columns)
+        return {
+          x: physics.idlePile.x + col * physics.idlePile.stepX,
+          y: physics.idlePile.y - row * physics.idlePile.stepY + (col ? 5 : 0),
+        }
+      }
 
       function tick(now) {
         const dt = Math.min(48, now - lastFrame) / 1000
         lastFrame = now
+        const sessions = snapshot.sessions || []
+        const busySessions = sessions.filter((session) => session.state === "busy")
+        const idleSessions = sessions.filter((session) => session.state === "idle")
         const order = new Map()
-        snapshot.sessions.forEach((session, index) => order.set(session.sessionID, { kind: session.state, index, session }))
+        busySessions.forEach((session, busyIndex) => order.set(session.sessionID, { kind: "busy", busyIndex, index: session.index ?? busyIndex, session }))
+        idleSessions.forEach((session, idleIndex) => order.set(session.sessionID, { kind: "idle", idleIndex, index: session.index ?? idleIndex, session }))
 
-        for (const session of snapshot.sessions) ensureDot(session, order.get(session.sessionID)?.index || 0)
+        stage.classList.toggle("has-busy", busySessions.length > 0)
+        stage.classList.toggle("has-sessions", sessions.length > 0)
 
-        for (const [id, dot] of dots) {
+        for (const session of sessions) ensureBall(session, session.index || 0)
+        const debugBalls = []
+
+        for (const [id, ball] of balls) {
           const info = order.get(id)
-          let targetScale = 0.92
+          let targetX = ball.x
+          let targetY = ball.y
+          let targetScale = 0.96
           let targetAlpha = 0.9
+          let className = "session-ball-runtime"
 
-          if (dot.leaving || !info) {
-            dot.vx = ease(dot.vx, 0, 1 - Math.pow(0.001, dt))
-            dot.vy = ease(dot.vy, 0, 1 - Math.pow(0.001, dt))
+          if (ball.leaving || !info) {
             targetScale = 0.2
             targetAlpha = 0
           } else if (info.kind === "busy") {
-            if (dot.mode !== "busy") {
-              dot.vx = dot.savedVx || info.session?.dynamics?.vx || 0
-              dot.vy = dot.savedVy || info.session?.dynamics?.vy || 96
-              dot.mode = "busy"
-            }
-            const speed = Math.sqrt(dot.vx * dot.vx + dot.vy * dot.vy)
-            if (speed > physics.maxSpeed) {
-              dot.vx = (dot.vx / speed) * physics.maxSpeed
-              dot.vy = (dot.vy / speed) * physics.maxSpeed
-            }
-            dot.x += dot.vx * dt
-            dot.y += dot.vy * dt
-            const bounds = info.session?.dynamics?.bounds || physics.bounds
-            const half = 8
-            if (dot.x < bounds.left + half) {
-              dot.x = bounds.left + half
-              dot.vx = Math.abs(dot.vx)
-            } else if (dot.x > bounds.right - half) {
-              dot.x = bounds.right - half
-              dot.vx = -Math.abs(dot.vx)
-            }
-            if (dot.y < bounds.top + half) {
-              dot.y = bounds.top + half
-              dot.vy = Math.abs(dot.vy)
-            } else if (dot.y > bounds.bottom - half) {
-              dot.y = bounds.bottom - half
-              dot.vy = -Math.abs(dot.vy)
-            }
-            dot.savedVx = dot.vx
-            dot.savedVy = dot.vy
+            const target = busyTarget(info.busyIndex, busySessions.length, now)
+            targetX = target.x
+            targetY = target.y
             targetScale = 1
             targetAlpha = 1
+            className += " busy"
           } else {
-            if (dot.mode !== "idle") {
-              dot.savedVx = dot.vx
-              dot.savedVy = dot.vy
-              dot.vx = 0
-              dot.vy = 0
-              dot.mode = "idle"
-            }
-            const expiresFrom = info.session?.orbitTouchedAt || info.session?.lastAt || info.session?.idleAt || Date.now()
+            const target = idleTarget(info.idleIndex)
+            targetX = target.x
+            targetY = target.y
+            const expiresFrom = info.session?.idleAt || info.session?.lastAt || Date.now()
             const remaining = expiresFrom + physics.idleTtl - Date.now()
             const fade = clamp(remaining / physics.idleTtl, 0, 1)
-            targetAlpha = 0.9 * fade
+            targetAlpha = 0.88 * fade
             targetScale = 0.92
+            className += " idle"
           }
 
           const factor = 1 - Math.pow(0.06, dt)
-          dot.scale = ease(dot.scale, targetScale, factor)
-          dot.alpha = ease(dot.alpha, targetAlpha, factor)
-          dot.el.style.transform = "translate3d(" + dot.x + "px, " + dot.y + "px, 0) scale(" + dot.scale + ")"
-          dot.el.style.opacity = String(dot.alpha)
+          ball.x = ease(ball.x, targetX, factor)
+          ball.y = ease(ball.y, targetY, factor)
+          ball.scale = ease(ball.scale, targetScale, factor)
+          ball.alpha = ease(ball.alpha, targetAlpha, factor)
+          ball.el.className = className
+          ball.el.style.transform = "translate3d(" + snapPixel(ball.x) + "px, " + snapPixel(ball.y) + "px, 0) scale(" + ball.scale + ")"
+          ball.el.style.opacity = String(ball.alpha)
+          debugBalls.push({
+            id,
+            state: info?.kind || "leaving",
+            x: snapPixel(ball.x),
+            y: snapPixel(ball.y),
+            alpha: Number(ball.alpha.toFixed(3)),
+            scale: Number(ball.scale.toFixed(3)),
+            className,
+          })
 
-          if (dot.leaving && dot.alpha < 0.03) {
-            dot.el.remove()
-            dots.delete(id)
+          if (ball.leaving && ball.alpha < 0.03) {
+            ball.el.remove()
+            balls.delete(id)
           }
         }
+
+        latestDebug = { now: Date.now(), busy: busySessions.length, idle: idleSessions.length, balls: debugBalls }
 
         requestAnimationFrame(tick)
       }
 
+      requestAnimationFrame(tick)
+    </script>
+  </body>
+</html>`
+}
+
+function petHtml3D() {
+  const initialStateJson = JSON.stringify(getPetState()).replaceAll("<", "\\u003c")
+  const iconUrl = createIconDataUrl()
+  return `<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      html, body {
+        margin: 0;
+        width: 100%;
+        height: 100%;
+        background: transparent;
+        overflow: hidden;
+      }
+      .stage {
+        box-sizing: border-box;
+        width: 100%;
+        height: 100%;
+        position: relative;
+        background: transparent;
+        -webkit-app-region: drag;
+        user-select: none;
+        perspective: 360px;
+        perspective-origin: 50% 45%;
+      }
+      .cube-wrap {
+        position: absolute;
+        left: 50%;
+        top: 50%;
+        width: 62px;
+        height: 62px;
+        transform: translate(-50%, -50%);
+        transform-style: preserve-3d;
+        pointer-events: none;
+        filter: drop-shadow(0 6px 8px rgba(0, 0, 0, .20));
+      }
+      .cube {
+        position: absolute;
+        left: 50%;
+        top: 50%;
+        width: 42px;
+        height: 42px;
+        margin-left: -21px;
+        margin-top: -21px;
+        transform-style: preserve-3d;
+        will-change: transform;
+      }
+      .face {
+        position: absolute;
+        inset: 0;
+        width: 42px;
+        height: 42px;
+        display: block;
+        object-fit: contain;
+        backface-visibility: visible;
+        -webkit-backface-visibility: visible;
+        transform-style: preserve-3d;
+      }
+      .front { transform: translateZ(21px); }
+      .back { transform: rotateY(180deg) translateZ(21px); }
+      .right { transform: rotateY(90deg) translateZ(21px); }
+      .left { transform: rotateY(-90deg) translateZ(21px); }
+      .top { transform: rotateX(90deg) translateZ(21px); }
+      .bottom { transform: rotateX(-90deg) translateZ(21px); }
+      .fill-face {
+        position: absolute;
+        left: 50%;
+        top: 50%;
+        width: 28px;
+        height: 28px;
+        margin-left: -14px;
+        margin-top: -14px;
+        background: rgba(12, 12, 11, .86);
+        border-radius: 6px;
+        backface-visibility: visible;
+        -webkit-backface-visibility: visible;
+      }
+      .fill-front { transform: translateZ(14px); }
+      .fill-back { transform: rotateY(180deg) translateZ(14px); }
+      .fill-right { transform: rotateY(90deg) translateZ(14px); }
+      .fill-left { transform: rotateY(-90deg) translateZ(14px); }
+      .fill-top { transform: rotateX(90deg) translateZ(14px); }
+      .fill-bottom { transform: rotateX(-90deg) translateZ(14px); }
+      .stage.has-busy .cube-wrap {
+        filter: drop-shadow(0 6px 8px rgba(0, 0, 0, .24)) drop-shadow(0 0 7px rgba(31, 220, 205, .22));
+      }
+    </style>
+  </head>
+  <body>
+    <div class="stage" title="opencode pet：拖拽移动，右键打开菜单">
+      <div class="cube-wrap" aria-label="3D opencode pet">
+        <div class="cube" id="cube">
+          <div class="fill-face fill-front"></div>
+          <div class="fill-face fill-back"></div>
+          <div class="fill-face fill-right"></div>
+          <div class="fill-face fill-left"></div>
+          <div class="fill-face fill-top"></div>
+          <div class="fill-face fill-bottom"></div>
+          <img class="face front" src="${iconUrl}" draggable="false" />
+          <img class="face back" src="${iconUrl}" draggable="false" />
+          <img class="face right" src="${iconUrl}" draggable="false" />
+          <img class="face left" src="${iconUrl}" draggable="false" />
+          <img class="face top" src="${iconUrl}" draggable="false" />
+          <img class="face bottom" src="${iconUrl}" draggable="false" />
+        </div>
+      </div>
+    </div>
+    <script>
+      window.__PET_STATE = ${initialStateJson}
+      const stage = document.querySelector(".stage")
+      const cube = document.getElementById("cube")
+      let snapshot = window.__PET_STATE || { sessions: [] }
+      let lastFrame = performance.now()
+      let rotation = { x: -14, y: -28, z: 0 }
+      let spin = randomSpin()
+      let wasBusy = false
+      let latestDebug = { now: Date.now(), busy: 0, rotation, spin: null }
+
+      function randomBetween(min, max) {
+        return min + Math.random() * (max - min)
+      }
+
+      function randomSign() {
+        return Math.random() > 0.5 ? 1 : -1
+      }
+
+      function randomSpin() {
+        return {
+          x: randomBetween(18, 66) * randomSign(),
+          y: randomBetween(105, 185) * randomSign(),
+          z: randomBetween(3, 24) * randomSign(),
+        }
+      }
+
+      function setSnapshot(next) {
+        snapshot = next || { sessions: [] }
+      }
+
+      window.__setPetState = setSnapshot
+      window.__getPetDebug = () => latestDebug
+
+      function renderCube() {
+        cube.style.transform =
+          "rotateX(" + rotation.x.toFixed(3) + "deg) " +
+          "rotateY(" + rotation.y.toFixed(3) + "deg) " +
+          "rotateZ(" + rotation.z.toFixed(3) + "deg)"
+      }
+
+      function tick(now) {
+        const dt = Math.min(64, now - lastFrame) / 1000
+        lastFrame = now
+        const sessions = snapshot.sessions || []
+        const busyCount = sessions.filter((session) => session.state === "busy").length
+        const isBusy = busyCount > 0
+
+        if (isBusy && !wasBusy) spin = randomSpin()
+        wasBusy = isBusy
+        stage.classList.toggle("has-busy", isBusy)
+        stage.classList.toggle("has-sessions", sessions.length > 0)
+
+        if (isBusy) {
+          rotation.x += spin.x * dt
+          rotation.y += spin.y * dt
+          rotation.z += spin.z * dt
+        }
+        renderCube()
+        latestDebug = { now: Date.now(), busy: busyCount, rotation: { ...rotation }, spin: isBusy ? spin : null }
+        requestAnimationFrame(tick)
+      }
+
+      renderCube()
       requestAnimationFrame(tick)
     </script>
   </body>
@@ -485,8 +719,8 @@ function restorePosition(win) {
 function createPetWindow() {
   if (petWindow && !petWindow.isDestroyed()) return petWindow
   petWindow = new BrowserWindow({
-    width: 230,
-    height: 210,
+    width: 120,
+    height: 120,
     show: false,
     frame: false,
     resizable: false,
@@ -502,7 +736,7 @@ function createPetWindow() {
     },
   })
   petWindow.setAlwaysOnTop(true, "floating")
-  petWindow.loadURL("data:text/html;charset=utf-8," + encodeURIComponent(petHtml()))
+  petWindow.loadURL("data:text/html;charset=utf-8," + encodeURIComponent(petHtml3D()))
   petWindow.webContents.on("context-menu", () => buildMenu().popup({ window: petWindow }))
   petWindow.on("moved", () => {
     const [x, y] = petWindow.getPosition()
@@ -608,7 +842,42 @@ function startServer() {
       const url = new URL(req.url || "/", `http://${HOST}:${PORT}`)
 
       if (req.method === "GET" && url.pathname === "/health") {
-        return json(res, 200, { status: "good", pid: process.pid, port: PORT, events: events.length })
+        return json(res, 200, {
+          status: "good",
+          pid: process.pid,
+          port: PORT,
+          events: events.length,
+          pet: "pixel-opencode-pet",
+          sessions: getPetState().sessions.map(({ sessionID, state, busyIndex, idleIndex, color }) => ({
+            sessionID,
+            state,
+            busyIndex,
+            idleIndex,
+            color,
+          })),
+        })
+      }
+
+      if (req.method === "GET" && url.pathname === "/state") {
+        return json(res, 200, getPetState())
+      }
+
+      if (req.method === "GET" && url.pathname === "/snapshot") {
+        const win = createPetWindow()
+        const image = await win.webContents.capturePage()
+        const png = image.toPNG()
+        res.writeHead(200, {
+          "content-type": "image/png",
+          "access-control-allow-origin": "*",
+        })
+        res.end(png)
+        return
+      }
+
+      if (req.method === "GET" && url.pathname === "/debug-render") {
+        const win = createPetWindow()
+        const debug = await win.webContents.executeJavaScript("window.__getPetDebug?.()", true).catch(() => undefined)
+        return json(res, 200, debug || { ok: false, error: "debug renderer not ready" })
       }
 
       if (req.method === "POST" && url.pathname === "/event") {

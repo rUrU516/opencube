@@ -1,0 +1,99 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="520" viewBox="0 0 720 520" role="img" aria-label="opencode pet 3D busy spin concept">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f7f7f5"/>
+      <stop offset="1" stop-color="#e8e8e3"/>
+    </linearGradient>
+    <linearGradient id="side" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#050505"/>
+      <stop offset="1" stop-color="#1d1d1d"/>
+    </linearGradient>
+    <filter id="softShadow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="7"/>
+      <feOffset dx="0" dy="8" result="offset"/>
+      <feComponentTransfer>
+        <feFuncA type="linear" slope="0.25"/>
+      </feComponentTransfer>
+      <feMerge>
+        <feMergeNode/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="7" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,6 L8,3 z" fill="#ff5d73"/>
+    </marker>
+  </defs>
+
+  <rect width="720" height="520" fill="url(#bg)"/>
+
+  <text x="40" y="52" fill="#111" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="22" font-weight="700">busy 状态：opencode 小人 3D 转身</text>
+  <text x="40" y="82" fill="#555" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="14">任何 session busy → 绕竖直 Y 轴持续旋转；全部 idle → 停回正面</text>
+
+  <!-- 3D floor / orbit ring -->
+  <ellipse cx="360" cy="382" rx="172" ry="48" fill="#d7d7d0" opacity="0.8"/>
+  <ellipse cx="360" cy="382" rx="132" ry="34" fill="none" stroke="#ff5d73" stroke-width="5" stroke-dasharray="18 10" opacity="0.85"/>
+  <path d="M 248 376 C 286 333, 423 321, 492 363" fill="none" stroke="#ff5d73" stroke-width="6" marker-end="url(#arrow)" opacity="0.9"/>
+
+  <!-- vertical Y axis -->
+  <line x1="360" y1="110" x2="360" y2="405" stroke="#111" stroke-width="3" stroke-dasharray="8 8" opacity="0.35"/>
+  <text x="374" y="124" fill="#111" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13">Y 轴</text>
+
+  <!-- ghost frames showing rotation -->
+  <g opacity="0.18" transform="translate(218 212) skewY(-8) scale(.72 1)">
+    <rect x="0" y="0" width="84" height="120" fill="#050505"/>
+    <rect x="14" y="20" width="56" height="72" fill="#f6f4ec"/>
+    <rect x="30" y="36" width="24" height="44" fill="#050505"/>
+  </g>
+  <g opacity="0.22" transform="translate(450 212) skewY(8) scale(.72 1)">
+    <rect x="0" y="0" width="84" height="120" fill="#050505"/>
+    <rect x="14" y="20" width="56" height="72" fill="#f6f4ec"/>
+    <rect x="30" y="36" width="24" height="44" fill="#050505"/>
+  </g>
+
+  <!-- main 3D pet body -->
+  <g filter="url(#softShadow)">
+    <!-- back/side depth -->
+    <polygon points="306,159 432,159 458,184 458,340 432,360 306,360 282,338 282,184" fill="#030303"/>
+    <polygon points="432,159 458,184 458,340 432,360 432,159" fill="url(#side)"/>
+    <polygon points="306,159 432,159 458,184 330,184" fill="#242424"/>
+
+    <!-- ears / side blocks -->
+    <rect x="260" y="224" width="34" height="72" fill="#050505"/>
+    <rect x="268" y="236" width="18" height="48" fill="#242424"/>
+    <rect x="448" y="224" width="34" height="72" fill="#050505"/>
+    <rect x="448" y="236" width="18" height="48" fill="#202020"/>
+
+    <!-- front face -->
+    <rect x="306" y="176" width="126" height="164" fill="#050505"/>
+    <rect x="318" y="188" width="102" height="22" fill="#252525"/>
+    <rect x="318" y="316" width="102" height="18" fill="#171717"/>
+
+    <!-- opencode white plate: deliberately vertical rectangle -->
+    <rect x="324" y="216" width="88" height="104" fill="#2d2d2d"/>
+    <rect x="330" y="222" width="76" height="92" fill="#d8d5cc"/>
+    <rect x="338" y="230" width="60" height="76" fill="#ffffff"/>
+    <rect x="354" y="248" width="30" height="50" fill="#050505"/>
+    <rect x="354" y="248" width="30" height="13" fill="#111"/>
+
+    <!-- arms / hands -->
+    <rect x="236" y="308" width="54" height="18" fill="#050505"/>
+    <rect x="226" y="298" width="26" height="26" fill="#050505"/>
+    <rect x="232" y="303" width="16" height="11" fill="#303030"/>
+    <rect x="444" y="308" width="54" height="18" fill="#050505"/>
+    <rect x="484" y="298" width="26" height="26" fill="#050505"/>
+    <rect x="486" y="303" width="16" height="11" fill="#303030"/>
+
+    <!-- feet -->
+    <rect x="318" y="356" width="32" height="32" fill="#050505"/>
+    <rect x="390" y="356" width="32" height="32" fill="#050505"/>
+    <rect x="326" y="356" width="22" height="10" fill="#242424"/>
+    <rect x="398" y="356" width="22" height="10" fill="#242424"/>
+  </g>
+
+  <!-- notes -->
+  <g font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" fill="#333">
+    <text x="72" y="438">idle：正面静止</text>
+    <text x="72" y="462">busy：scaleX + skew + 明暗面，模拟 3D 绕 Y 轴旋转</text>
+    <text x="72" y="486">不再需要球，busy 反馈更简单直接</text>
+  </g>
+</svg>

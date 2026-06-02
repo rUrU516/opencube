@@ -1,0 +1,324 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>opencode pet 3D spin preview</title>
+    <style>
+      :root {
+        --bg: #f4f4ef;
+        --ink: #050505;
+        --dark: #111;
+        --mid: #242424;
+        --plate: #d8d5cc;
+        --paper: #fff;
+        --accent: #ff5d73;
+      }
+
+      * { box-sizing: border-box; }
+      html, body {
+        margin: 0;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background:
+          linear-gradient(180deg, rgba(255,255,255,.8), rgba(230,230,222,.85)),
+          radial-gradient(circle at 50% 42%, rgba(255,93,115,.12), transparent 34%),
+          var(--bg);
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        color: #151515;
+        user-select: none;
+      }
+
+      .toolbar {
+        position: fixed;
+        left: 24px;
+        top: 22px;
+        display: flex;
+        gap: 10px;
+        align-items: center;
+        z-index: 10;
+      }
+
+      button {
+        appearance: none;
+        border: 2px solid #111;
+        background: white;
+        color: #111;
+        border-radius: 10px;
+        padding: 9px 13px;
+        font: inherit;
+        font-weight: 800;
+        cursor: pointer;
+        box-shadow: 0 4px 0 rgba(0,0,0,.18);
+      }
+      button:active { transform: translateY(2px); box-shadow: 0 2px 0 rgba(0,0,0,.18); }
+      .hint { font-size: 13px; opacity: .65; }
+
+      .pet-wrap {
+        position: absolute;
+        left: 50%;
+        top: 54%;
+        width: 300px;
+        height: 300px;
+        transform: translate(-50%, -50%);
+        cursor: grab;
+        touch-action: none;
+        perspective: 720px;
+      }
+      .pet-wrap.dragging { cursor: grabbing; }
+
+      .floor {
+        position: absolute;
+        left: 42px;
+        top: 226px;
+        width: 214px;
+        height: 58px;
+        border-radius: 999px;
+        background: rgba(0,0,0,.11);
+        transform: perspective(500px) rotateX(66deg);
+      }
+      .ring {
+        position: absolute;
+        left: 58px;
+        top: 231px;
+        width: 180px;
+        height: 46px;
+        border-radius: 999px;
+        border: 4px dashed rgba(255,93,115,.75);
+        transform: perspective(500px) rotateX(66deg);
+        opacity: 0;
+        transition: opacity 180ms steps(2, end);
+      }
+      .busy .ring { opacity: 1; }
+
+      .axis {
+        position: absolute;
+        left: 149px;
+        top: 42px;
+        width: 2px;
+        height: 230px;
+        background: repeating-linear-gradient(to bottom, rgba(0,0,0,.25) 0 7px, transparent 7px 14px);
+        opacity: 0;
+        transition: opacity 180ms steps(2, end);
+      }
+      .busy .axis { opacity: .55; }
+
+      .pet-3d {
+        position: absolute;
+        left: 50%;
+        top: 46px;
+        width: 190px;
+        height: 210px;
+        transform-style: preserve-3d;
+        transform-origin: 50% 58%;
+        transform: translateX(-50%) rotateY(0deg);
+        image-rendering: pixelated;
+        filter: drop-shadow(0 16px 12px rgba(0,0,0,.22));
+      }
+
+      .busy .pet-3d {
+        animation: spin3d 1.05s linear infinite;
+      }
+
+      @keyframes spin3d {
+        0%   { transform: translateX(-50%) perspective(520px) rotateY(0deg); }
+        25%  { transform: translateX(-50%) perspective(520px) rotateY(72deg); }
+        50%  { transform: translateX(-50%) perspective(520px) rotateY(180deg); }
+        75%  { transform: translateX(-50%) perspective(520px) rotateY(288deg); }
+        100% { transform: translateX(-50%) perspective(520px) rotateY(360deg); }
+      }
+
+      .solid {
+        position: absolute;
+        transform-style: preserve-3d;
+      }
+      .solid > i {
+        position: absolute;
+        display: block;
+        image-rendering: pixelated;
+        backface-visibility: visible;
+      }
+
+      .body3d {
+        left: 36px;
+        top: 32px;
+        width: 120px;
+        height: 144px;
+        --d: 56px;
+      }
+      .body3d .front { width: 120px; height: 144px; background: var(--ink); transform: translateZ(28px); }
+      .body3d .back { width: 120px; height: 144px; background: #070707; transform: rotateY(180deg) translateZ(28px); }
+      .body3d .left { left: -56px; width: 56px; height: 144px; background: #030303; transform-origin: right center; transform: rotateY(-90deg); }
+      .body3d .right { left: 120px; width: 56px; height: 144px; background: linear-gradient(90deg, #060606, #242424); transform-origin: left center; transform: rotateY(90deg); }
+      .body3d .top { top: -56px; width: 120px; height: 56px; background: #2c2c2c; transform-origin: bottom center; transform: rotateX(90deg); }
+      .body3d .bottom { top: 144px; width: 120px; height: 56px; background: #171717; transform-origin: top center; transform: rotateX(-90deg); }
+      .body3d .front::before {
+        content: "";
+        position: absolute;
+        left: 12px;
+        top: 12px;
+        width: 96px;
+        height: 18px;
+        background: #2d2d2d;
+      }
+      .body3d .front::after {
+        content: "";
+        position: absolute;
+        left: 10px;
+        bottom: 10px;
+        width: 100px;
+        height: 16px;
+        background: #171717;
+      }
+
+      .screen3d {
+        left: 58px;
+        top: 72px;
+        width: 76px;
+        height: 92px;
+        transform: translateZ(42px);
+      }
+      .screen3d .screen-front { width: 76px; height: 92px; background: #2d2d2d; transform: translateZ(7px); }
+      .screen3d .screen-left { left: -14px; width: 14px; height: 92px; background: #1a1a1a; transform-origin: right center; transform: rotateY(-90deg); }
+      .screen3d .screen-right { left: 76px; width: 14px; height: 92px; background: #3c3c3c; transform-origin: left center; transform: rotateY(90deg); }
+      .screen3d .screen-top { top: -14px; width: 76px; height: 14px; background: #4a4a4a; transform-origin: bottom center; transform: rotateX(90deg); }
+      .screen3d .rim {
+        position: absolute;
+        left: 6px;
+        top: 6px;
+        width: 64px;
+        height: 80px;
+        background: var(--plate);
+      }
+      .screen3d .paper {
+        position: absolute;
+        left: 14px;
+        top: 14px;
+        width: 48px;
+        height: 64px;
+        background: var(--paper);
+      }
+      .screen3d .glyph {
+        position: absolute;
+        left: 30px;
+        top: 34px;
+        width: 24px;
+        height: 42px;
+        background: var(--ink);
+        box-shadow: 0 -10px 0 #111;
+      }
+
+      .ear-left, .ear-right, .arm-left, .arm-right, .hand-left, .hand-right, .foot-left, .foot-right {
+        position: absolute;
+        transform-style: preserve-3d;
+        background: var(--ink);
+        transform: translateZ(18px);
+        box-shadow: 8px 0 0 #181818;
+      }
+      .ear-left { left: 14px; top: 86px; width: 22px; height: 54px; }
+      .ear-right { left: 156px; top: 86px; width: 22px; height: 54px; }
+      .arm-left { left: 0; top: 140px; width: 42px; height: 14px; }
+      .arm-right { left: 150px; top: 140px; width: 42px; height: 14px; }
+      .hand-left { left: -8px; top: 130px; width: 24px; height: 24px; }
+      .hand-right { left: 176px; top: 130px; width: 24px; height: 24px; }
+      .foot-left { left: 58px; top: 184px; width: 30px; height: 30px; }
+      .foot-right { left: 116px; top: 184px; width: 30px; height: 30px; }
+
+      .label {
+        position: fixed;
+        right: 24px;
+        bottom: 22px;
+        max-width: 360px;
+        font-size: 13px;
+        line-height: 1.6;
+        color: rgba(0,0,0,.6);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="toolbar">
+      <button id="toggle">busy: on</button>
+      <span class="hint">拖动小人；busy 时 3D 转，idle 时停正面</span>
+    </div>
+
+    <div id="wrap" class="pet-wrap busy">
+      <div class="floor"></div>
+      <div class="ring"></div>
+      <div class="axis"></div>
+      <div class="pet-3d">
+        <div class="solid body3d">
+          <i class="front"></i>
+          <i class="back"></i>
+          <i class="left"></i>
+          <i class="right"></i>
+          <i class="top"></i>
+          <i class="bottom"></i>
+        </div>
+        <div class="solid screen3d">
+          <i class="screen-front"><span class="rim"></span><span class="paper"></span><span class="glyph"></span></i>
+          <i class="screen-left"></i>
+          <i class="screen-right"></i>
+          <i class="screen-top"></i>
+        </div>
+        <div class="ear-left"></div><div class="ear-right"></div>
+        <div class="arm-left"></div><div class="arm-right"></div>
+        <div class="hand-left"></div><div class="hand-right"></div>
+        <div class="foot-left"></div><div class="foot-right"></div>
+      </div>
+    </div>
+
+    <div class="label">
+      Concept preview only. 之后可以把这个 busy/idle 动效迁移回 Electron pet：任意 session busy 就加 <b>.busy</b>，全部 idle 就移除。
+    </div>
+
+    <script>
+      const wrap = document.getElementById("wrap")
+      const toggle = document.getElementById("toggle")
+      let busy = true
+      toggle.addEventListener("click", () => {
+        busy = !busy
+        wrap.classList.toggle("busy", busy)
+        toggle.textContent = "busy: " + (busy ? "on" : "off")
+      })
+
+      let dragging = false
+      let startX = 0
+      let startY = 0
+      let originX = 0
+      let originY = 0
+
+      function currentPosition() {
+        const rect = wrap.getBoundingClientRect()
+        return { x: rect.left, y: rect.top }
+      }
+
+      wrap.addEventListener("pointerdown", (event) => {
+        dragging = true
+        wrap.classList.add("dragging")
+        wrap.setPointerCapture(event.pointerId)
+        const pos = currentPosition()
+        startX = event.clientX
+        startY = event.clientY
+        originX = pos.x
+        originY = pos.y
+        wrap.style.left = originX + "px"
+        wrap.style.top = originY + "px"
+        wrap.style.transform = "none"
+      })
+
+      wrap.addEventListener("pointermove", (event) => {
+        if (!dragging) return
+        wrap.style.left = originX + event.clientX - startX + "px"
+        wrap.style.top = originY + event.clientY - startY + "px"
+      })
+
+      function stopDrag() {
+        dragging = false
+        wrap.classList.remove("dragging")
+      }
+      wrap.addEventListener("pointerup", stopDrag)
+      wrap.addEventListener("pointercancel", stopDrag)
+    </script>
+  </body>
+</html>
