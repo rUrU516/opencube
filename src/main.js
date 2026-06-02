@@ -548,6 +548,11 @@ function petHtml3D() {
         transform: translate(-50%, -50%);
         transform-style: preserve-3d;
         pointer-events: none;
+        --glow-blur: 0px;
+        --glow-alpha: 0;
+        --glow-r: 92;
+        --glow-g: 255;
+        --glow-b: 232;
         filter: drop-shadow(0 6px 8px rgba(0, 0, 0, .20));
       }
       .cube {
@@ -572,12 +577,12 @@ function petHtml3D() {
         -webkit-backface-visibility: visible;
         transform-style: preserve-3d;
       }
-      .front { transform: translateZ(21px); }
-      .back { transform: rotateY(180deg) translateZ(21px); }
-      .right { transform: rotateY(90deg) translateZ(21px); }
-      .left { transform: rotateY(-90deg) translateZ(21px); }
-      .top { transform: rotateX(90deg) translateZ(21px); }
-      .bottom { transform: rotateX(-90deg) translateZ(21px); }
+      .front { transform: translateZ(21px) rotateZ(var(--face-rot, 0deg)); }
+      .back { transform: rotateY(180deg) translateZ(21px) rotateZ(var(--face-rot, 0deg)); }
+      .right { transform: rotateY(90deg) translateZ(21px) rotateZ(var(--face-rot, 0deg)); }
+      .left { transform: rotateY(-90deg) translateZ(21px) rotateZ(var(--face-rot, 0deg)); }
+      .top { transform: rotateX(90deg) translateZ(21px) rotateZ(var(--face-rot, 0deg)); }
+      .bottom { transform: rotateX(-90deg) translateZ(21px) rotateZ(var(--face-rot, 0deg)); }
       .fill-face {
         position: absolute;
         left: 50%;
@@ -598,7 +603,7 @@ function petHtml3D() {
       .fill-top { transform: rotateX(90deg) translateZ(14px); }
       .fill-bottom { transform: rotateX(-90deg) translateZ(14px); }
       .stage.has-busy .cube-wrap {
-        filter: drop-shadow(0 6px 8px rgba(0, 0, 0, .24)) drop-shadow(0 0 7px rgba(31, 220, 205, .22));
+        filter: drop-shadow(0 6px 8px rgba(0, 0, 0, .24)) drop-shadow(0 0 var(--glow-blur) rgba(var(--glow-r), var(--glow-g), var(--glow-b), var(--glow-alpha)));
       }
     </style>
   </head>
@@ -612,25 +617,29 @@ function petHtml3D() {
           <div class="fill-face fill-left"></div>
           <div class="fill-face fill-top"></div>
           <div class="fill-face fill-bottom"></div>
-          <img class="face front" src="${iconUrl}" draggable="false" />
-          <img class="face back" src="${iconUrl}" draggable="false" />
-          <img class="face right" src="${iconUrl}" draggable="false" />
-          <img class="face left" src="${iconUrl}" draggable="false" />
-          <img class="face top" src="${iconUrl}" draggable="false" />
-          <img class="face bottom" src="${iconUrl}" draggable="false" />
+          <img class="face front" data-face="front" src="${iconUrl}" draggable="false" />
+          <img class="face back" data-face="back" src="${iconUrl}" draggable="false" />
+          <img class="face right" data-face="right" src="${iconUrl}" draggable="false" />
+          <img class="face left" data-face="left" src="${iconUrl}" draggable="false" />
+          <img class="face top" data-face="top" src="${iconUrl}" draggable="false" />
+          <img class="face bottom" data-face="bottom" src="${iconUrl}" draggable="false" />
         </div>
       </div>
     </div>
     <script>
       window.__PET_STATE = ${initialStateJson}
       const stage = document.querySelector(".stage")
+      const cubeWrap = document.querySelector(".cube-wrap")
       const cube = document.getElementById("cube")
+      const faces = Array.from(document.querySelectorAll(".face"))
       let snapshot = window.__PET_STATE || { sessions: [] }
       let lastFrame = performance.now()
       let rotation = { x: -14, y: -28, z: 0 }
-      let spin = randomSpin()
+      let angularVelocity = { x: 0, y: 0, z: 0 }
+      let torque = { x: 0, y: 0, z: 0 }
+      let nextTorqueAt = 0
       let wasBusy = false
-      let latestDebug = { now: Date.now(), busy: 0, rotation, spin: null }
+      let latestDebug = { now: Date.now(), busy: 0, rotation, angularVelocity, torque, speed: 0, faceRotations: {} }
 
       function randomBetween(min, max) {
         return min + Math.random() * (max - min)
@@ -640,12 +649,52 @@ function petHtml3D() {
         return Math.random() > 0.5 ? 1 : -1
       }
 
-      function randomSpin() {
+      function randomTorque() {
         return {
-          x: randomBetween(18, 66) * randomSign(),
-          y: randomBetween(105, 185) * randomSign(),
-          z: randomBetween(3, 24) * randomSign(),
+          x: randomBetween(90, 260) * randomSign(),
+          y: randomBetween(180, 520) * randomSign(),
+          z: randomBetween(35, 160) * randomSign(),
         }
+      }
+
+      function randomChoice(items) {
+        return items[Math.floor(Math.random() * items.length)]
+      }
+
+      function makeFaceRotations() {
+        const quarterTurns = [0, 90, 180, 270]
+        return {
+          front: Math.random() < 0.7 ? 0 : randomChoice(quarterTurns),
+          back: randomChoice(quarterTurns),
+          right: randomChoice(quarterTurns),
+          left: randomChoice(quarterTurns),
+          top: randomChoice(quarterTurns),
+          bottom: randomChoice(quarterTurns),
+        }
+      }
+
+      const faceRotations = makeFaceRotations()
+      for (const face of faces) {
+        face.style.setProperty("--face-rot", (faceRotations[face.dataset.face] || 0) + "deg")
+      }
+
+      function magnitude(vector) {
+        return Math.sqrt(vector.x * vector.x + vector.y * vector.y + vector.z * vector.z)
+      }
+
+      function clampMagnitude(vector, max) {
+        const length = magnitude(vector)
+        if (length <= max || length === 0) return vector
+        const scale = max / length
+        vector.x *= scale
+        vector.y *= scale
+        vector.z *= scale
+        return vector
+      }
+
+      function setNextTorque(now) {
+        torque = randomTorque()
+        nextTorqueAt = now + randomBetween(4800, 5200)
       }
 
       function setSnapshot(next) {
@@ -669,18 +718,51 @@ function petHtml3D() {
         const busyCount = sessions.filter((session) => session.state === "busy").length
         const isBusy = busyCount > 0
 
-        if (isBusy && !wasBusy) spin = randomSpin()
+        if (isBusy && !wasBusy) setNextTorque(now)
+        if (isBusy && now >= nextTorqueAt) setNextTorque(now)
+        if (!isBusy) torque = { x: 0, y: 0, z: 0 }
         wasBusy = isBusy
         stage.classList.toggle("has-busy", isBusy)
         stage.classList.toggle("has-sessions", sessions.length > 0)
 
-        if (isBusy) {
-          rotation.x += spin.x * dt
-          rotation.y += spin.y * dt
-          rotation.z += spin.z * dt
-        }
+        const inertia = 1.18
+        const friction = isBusy ? 0.58 : 2.85
+        angularVelocity.x += (torque.x / inertia) * dt
+        angularVelocity.y += (torque.y / inertia) * dt
+        angularVelocity.z += (torque.z / inertia) * dt
+        const damping = Math.exp(-friction * dt)
+        angularVelocity.x *= damping
+        angularVelocity.y *= damping
+        angularVelocity.z *= damping
+        clampMagnitude(angularVelocity, 1400)
+
+        rotation.x += angularVelocity.x * dt
+        rotation.y += angularVelocity.y * dt
+        rotation.z += angularVelocity.z * dt
+
+        const speed = magnitude(angularVelocity)
+        const glow = Math.min(1, speed / 1400)
+        const glowR = Math.round(92 + (0 - 92) * glow)
+        const glowG = Math.round(255 + (190 - 255) * glow)
+        const glowB = Math.round(232 + (210 - 232) * glow)
+        cubeWrap.style.setProperty("--glow-blur", (5 + glow * 10).toFixed(2) + "px")
+        cubeWrap.style.setProperty("--glow-alpha", (0.12 + glow * 0.22).toFixed(3))
+        cubeWrap.style.setProperty("--glow-r", String(glowR))
+        cubeWrap.style.setProperty("--glow-g", String(glowG))
+        cubeWrap.style.setProperty("--glow-b", String(glowB))
         renderCube()
-        latestDebug = { now: Date.now(), busy: busyCount, rotation: { ...rotation }, spin: isBusy ? spin : null }
+        latestDebug = {
+          now: Date.now(),
+          busy: busyCount,
+          rotation: { ...rotation },
+          angularVelocity: { ...angularVelocity },
+          torque: { ...torque },
+          speed,
+          nextTorqueAt,
+          glow,
+          glowColor: { r: glowR, g: glowG, b: glowB },
+          faceRotations,
+        }
         requestAnimationFrame(tick)
       }
 
