@@ -30,7 +30,7 @@ async function emitProgress(onProgress, message) {
   try {
     await onProgress(message)
   } catch {
-    // Progress is best-effort; never block OpenCub startup on UI notices.
+    // Progress is best-effort; never block OpenCube startup on UI notices.
   }
 }
 
@@ -76,11 +76,11 @@ async function installElectronBinary(electronDir, options = {}) {
   const executablePath = path.join(distPath, platformPath)
 
   if (fs.existsSync(executablePath)) {
-    await emitProgress(options.onProgress, "OpenCub: Electron binary is ready ✅")
+    await emitProgress(options.onProgress, "OpenCube: Electron binary is ready ✅")
     return executablePath
   }
 
-  await emitProgress(options.onProgress, `OpenCub: downloading Electron ${version} for ${platform}/${arch}...`)
+  await emitProgress(options.onProgress, `OpenCube: downloading Electron ${version} for ${platform}/${arch}...`)
   const zipPath = await downloadArtifact({
     version,
     artifactName: "electron",
@@ -89,19 +89,19 @@ async function installElectronBinary(electronDir, options = {}) {
     platform,
     arch,
   })
-  await emitProgress(options.onProgress, "OpenCub: extracting Electron binary...")
+  await emitProgress(options.onProgress, "OpenCube: extracting Electron binary...")
   await extractElectronZip(zipPath, distPath)
   await fs.promises.writeFile(path.join(electronDir, "path.txt"), platformPath)
-  await emitProgress(options.onProgress, "OpenCub: Electron binary installed ✅")
+  await emitProgress(options.onProgress, "OpenCube: Electron binary installed ✅")
   return executablePath
 }
 
 async function resolveElectronPath(options = {}) {
-  await emitProgress(options.onProgress, "OpenCub: checking Electron runtime...")
+  await emitProgress(options.onProgress, "OpenCube: checking Electron runtime...")
   try {
     const electronPath = require("electron")
     if (typeof electronPath === "string") {
-      await emitProgress(options.onProgress, "OpenCub: Electron runtime is ready ✅")
+      await emitProgress(options.onProgress, "OpenCube: Electron runtime is ready ✅")
       return electronPath
     }
 
@@ -109,12 +109,12 @@ async function resolveElectronPath(options = {}) {
     // environment require("electron") can resolve to Electron's built-in API
     // object instead of the npm package's executable path string. Fall through
     // to the npm package directory and resolve/repair the packaged binary.
-    await emitProgress(options.onProgress, "OpenCub: locating packaged Electron binary...")
+    await emitProgress(options.onProgress, "OpenCube: locating packaged Electron binary...")
     const electronPackage = require.resolve("electron/package.json")
     const electronDir = path.dirname(electronPackage)
     return await installElectronBinary(electronDir, options)
   } catch (error) {
-    await emitProgress(options.onProgress, "OpenCub: Electron runtime is incomplete; repairing...")
+    await emitProgress(options.onProgress, "OpenCube: Electron runtime is incomplete; repairing...")
     const electronPackage = require.resolve("electron/package.json")
     const electronDir = path.dirname(electronPackage)
     return await installElectronBinary(electronDir, options)
@@ -123,7 +123,7 @@ async function resolveElectronPath(options = {}) {
 
 async function launchPet(args = [], options = {}) {
   const electronPath = await resolveElectronPath(options)
-  await emitProgress(options.onProgress, "OpenCub: launching desktop pet...")
+  await emitProgress(options.onProgress, "OpenCube: launching desktop pet...")
   const child = spawn(electronPath, [PET_APP_DIR, ...args], {
     cwd: PET_APP_DIR,
     detached: true,
@@ -134,7 +134,7 @@ async function launchPet(args = [], options = {}) {
     },
   })
   child.unref()
-  await emitProgress(options.onProgress, "OpenCub: launch request sent 🐾")
+  await emitProgress(options.onProgress, "OpenCube: launch request sent 🐾")
 }
 
 async function requestPet(pathname, options = {}) {
@@ -165,28 +165,28 @@ async function healthPet() {
 }
 
 async function waitForPet(timeoutMs = 3500, options = {}) {
-  await emitProgress(options.onProgress, "OpenCub: waiting for local server...")
+  await emitProgress(options.onProgress, "OpenCube: waiting for local server...")
   const startedAt = Date.now()
   while (Date.now() - startedAt < timeoutMs) {
     const health = await healthPet()
     if (health) {
-      await emitProgress(options.onProgress, "OpenCub: local server is ready ✅")
+      await emitProgress(options.onProgress, "OpenCube: local server is ready ✅")
       return health
     }
     await new Promise((resolve) => setTimeout(resolve, 150))
   }
-  await emitProgress(options.onProgress, "OpenCub: local server did not answer yet")
+  await emitProgress(options.onProgress, "OpenCube: local server did not answer yet")
   return undefined
 }
 
 async function ensurePet(options = {}) {
-  await emitProgress(options.onProgress, "OpenCub: checking whether it is already running...")
+  await emitProgress(options.onProgress, "OpenCube: checking whether it is already running...")
   const existing = await healthPet()
   if (existing) {
-    await emitProgress(options.onProgress, "OpenCub: already running; showing window...")
+    await emitProgress(options.onProgress, "OpenCube: already running; showing window...")
     return existing
   }
-  await emitProgress(options.onProgress, "OpenCub: not running; starting now...")
+  await emitProgress(options.onProgress, "OpenCube: not running; starting now...")
   await launchPet(["--show"], options)
   return await waitForPet(3500, options)
 }
@@ -194,7 +194,7 @@ async function ensurePet(options = {}) {
 async function showPet(options = {}) {
   const health = await ensurePet(options)
   await requestPet("/show", { method: "POST", timeoutMs: 800 })
-  await emitProgress(options.onProgress, health ? "OpenCub: shown ✨" : "OpenCub: start requested, still warming up...")
+  await emitProgress(options.onProgress, health ? "OpenCube: shown ✨" : "OpenCube: start requested, still warming up...")
   return health
 }
 
@@ -208,7 +208,7 @@ async function quitPet() {
 }
 
 async function sendEvent(event) {
-  // Only /pet is allowed to start OpenCub. Session lifecycle events and hello
+  // Only /pet is allowed to start OpenCube. Session lifecycle events and hello
   // commands should talk to the desktop pet only if it is already running.
   const health = await healthPet()
   if (!health) return undefined

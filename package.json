@@ -1,7 +1,6 @@
 {
-  "name": "opencub",
-  "version": "0.1.0",
-  "private": true,
+  "name": "opencube",
+  "version": "0.1.1",
   "description": "A tiny Three.js desktop pet for opencode session activity.",
   "main": "src/main.js",
   "exports": {

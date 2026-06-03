@@ -48,7 +48,7 @@ function cubNotice(text, icon = CUB_ICON) {
 }
 
 module.exports = {
-  id: "opencode-pet",
+  id: "opencube",
   server: async ({ client }) => {
     const sessionStatus = new Map()
 
@@ -68,11 +68,11 @@ module.exports = {
         }
         cfg.command.pet_say_hello = {
           template: "/pet_say_hello",
-          description: "Send a hello test event to OpenCub.",
+          description: "Send a hello test event to OpenCube.",
         }
         cfg.command.pet_fancy_say_hello = {
           template: "/pet_fancy_say_hello",
-          description: "Trigger a randomized light show on OpenCub's free faces.",
+          description: "Trigger a randomized light show on OpenCube's free faces.",
         }
       },
 
@@ -87,7 +87,7 @@ module.exports = {
 
         if (shouldQuit(input)) {
           await quitPet()
-          await injectNotice(client, input.sessionID, cubNotice("OpenCub is going to sleep 🐾", "◌"))
+          await injectNotice(client, input.sessionID, cubNotice("OpenCube is going to sleep 🐾", "◌"))
         } else if (isSayHello(input)) {
           const result = await sendEvent({
             type: "hello",
@@ -95,12 +95,12 @@ module.exports = {
             command: input.command,
             arguments: input.arguments,
             sessionID: input.sessionID,
-            source: "opencode-pet-plugin",
+            source: "opencube-plugin",
           })
           await injectNotice(
             client,
             input.sessionID,
-            result ? cubNotice("OpenCub got your hello 🐾", "✦") : cubNotice("OpenCub is sleeping... zzz  Use /pet to wake it.", "☾"),
+            result ? cubNotice("OpenCube got your hello 🐾", "✦") : cubNotice("OpenCube is sleeping... zzz  Use /pet to wake it.", "☾"),
           )
         } else if (isFancySayHello(input)) {
           const result = await sendEvent({
@@ -109,14 +109,14 @@ module.exports = {
             command: input.command,
             arguments: input.arguments,
             sessionID: input.sessionID,
-            source: "opencode-pet-plugin",
+            source: "opencube-plugin",
           })
           await injectNotice(
             client,
             input.sessionID,
             result
-              ? cubNotice("OpenCub is putting on a light show ✨", "✺")
-              : cubNotice("OpenCub is sleeping... zzz  Start it with /pet before the light show.", "☾"),
+              ? cubNotice("OpenCube is putting on a light show ✨", "✺")
+              : cubNotice("OpenCube is sleeping... zzz  Start it with /pet before the light show.", "☾"),
           )
         } else {
           await showPet({
@@ -146,7 +146,7 @@ module.exports = {
             sessionID,
             status,
             previousStatus: previous,
-            source: "opencode-pet-plugin",
+            source: "opencube-plugin",
           })
           return
         }
@@ -161,7 +161,7 @@ module.exports = {
           sessionID,
           status,
           previousStatus: previous,
-          source: "opencode-pet-plugin",
+          source: "opencube-plugin",
         })
       },
     }

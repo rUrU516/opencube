@@ -9,7 +9,7 @@ const { DEFAULT_SESSION_COLORS, pixelPetSvg } = require("./pixel-pet-reference.c
 const APP_NAME = "opencode pet"
 const HOST = "127.0.0.1"
 const PORT = Number(process.env.OPENCODE_PET_PORT || 47832)
-const DATA_DIR = path.join(os.homedir(), ".local", "share", "opencode-pet")
+const DATA_DIR = path.join(os.homedir(), ".local", "share", "opencube")
 const STATE_FILE = path.join(DATA_DIR, "state.json")
 const PET_HTML_FILE = path.join(DATA_DIR, "pet.html")
 const ICON_PATH = process.env.OPENCODE_PET_ICON || path.join(__dirname, "..", "assets", "opencode-icon.png")
@@ -1169,7 +1169,7 @@ function startServer() {
           pid: process.pid,
           port: PORT,
           events: events.length,
-          pet: "pixel-opencode-pet",
+          pet: "opencube",
           sessions: getPetState().sessions.map(({ sessionID, state, busyIndex, idleIndex, color }) => ({
             sessionID,
             state,
