@@ -3,7 +3,6 @@ const fs = require("node:fs")
 const http = require("node:http")
 const os = require("node:os")
 const path = require("node:path")
-const { pathToFileURL } = require("node:url")
 
 const { DEFAULT_SESSION_COLORS, pixelPetSvg } = require("./pixel-pet-reference.cjs")
 
@@ -530,7 +529,7 @@ function petHtml() {
 function petHtml3D() {
   const initialStateJson = JSON.stringify(getPetState()).replaceAll("<", "\\u003c")
   const iconUrl = createIconDataUrl()
-  const threeUrl = pathToFileURL(path.join(__dirname, "..", "node_modules", "three", "build", "three.module.js")).href
+  const threeCjsPath = JSON.stringify(path.join(path.dirname(require.resolve("three")), "three.cjs"))
   return `<!doctype html>
 <html>
   <head>
@@ -565,8 +564,17 @@ function petHtml3D() {
     <div class="stage" title="opencode pet：拖拽移动，右键打开菜单">
       <canvas id="scene" aria-label="3D opencode pet"></canvas>
     </div>
-    <script type="module">
-      import * as THREE from "${threeUrl}"
+    <script>
+      window.__PET_BOOT_ERROR = null
+      window.addEventListener("error", (event) => {
+        window.__PET_BOOT_ERROR = { ok: false, error: String(event.error?.stack || event.message || event), source: event.filename, line: event.lineno, column: event.colno }
+      })
+      window.addEventListener("unhandledrejection", (event) => {
+        window.__PET_BOOT_ERROR = { ok: false, error: String(event.reason?.stack || event.reason || event) }
+      })
+    </script>
+    <script>
+      const THREE = require(${threeCjsPath})
 
       window.__PET_STATE = ${initialStateJson}
       const stage = document.querySelector(".stage")
@@ -1045,8 +1053,8 @@ function createPetWindow() {
     hasShadow: false,
     title: APP_NAME,
     webPreferences: {
-      contextIsolation: true,
-      nodeIntegration: false,
+      contextIsolation: false,
+      nodeIntegration: true,
     },
   })
   petWindow.setAlwaysOnTop(true, "floating")
@@ -1190,7 +1198,7 @@ function startServer() {
 
       if (req.method === "GET" && url.pathname === "/debug-render") {
         const win = createPetWindow()
-        const debug = await win.webContents.executeJavaScript("window.__getPetDebug?.()", true).catch(() => undefined)
+        const debug = await win.webContents.executeJavaScript("window.__getPetDebug?.() || window.__PET_BOOT_ERROR", true).catch(() => undefined)
         return json(res, 200, debug || { ok: false, error: "debug renderer not ready" })
       }
 
