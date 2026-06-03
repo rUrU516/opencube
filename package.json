@@ -1,20 +1,29 @@
 {
-  "name": "opencode-pet",
-  "version": "0.2.0",
+  "name": "opencub",
+  "version": "0.1.0",
   "private": true,
-  "description": "Tiny opencode pet menu bar app",
+  "description": "A tiny Three.js desktop pet for opencode session activity.",
   "main": "src/main.js",
   "exports": {
-    "./server": "./src/plugin-server.cjs",
-    "./tui": "./src/plugin-tui.cjs"
+    "./server": "./src/plugin-server.cjs"
   },
+  "files": [
+    "assets",
+    "src",
+    "README.md"
+  ],
   "scripts": {
     "start": "electron ."
   },
-  "devDependencies": {
-    "electron": "^39.2.6"
-  },
   "dependencies": {
+    "electron": "^39.2.6",
     "three": "^0.184.0"
-  }
+  },
+  "keywords": [
+    "opencode",
+    "opencode-plugin",
+    "desktop-pet",
+    "electron",
+    "threejs"
+  ]
 }

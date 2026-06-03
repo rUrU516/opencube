@@ -1,13 +1,14 @@
 const { spawn } = require("node:child_process")
 const path = require("node:path")
+const electronPath = require("electron")
 
-const PET_APP_DIR = "/Users/zhuoru/opencode-pet"
+const PET_APP_DIR = path.resolve(__dirname, "..")
 const PET_HOST = "127.0.0.1"
 const PET_PORT = Number(process.env.OPENCODE_PET_PORT || 47832)
 const PET_BASE_URL = `http://${PET_HOST}:${PET_PORT}`
 
 function launchPet(args = []) {
-  const child = spawn("npm", ["run", "start", "--", ...args], {
+  const child = spawn(electronPath, [PET_APP_DIR, ...args], {
     cwd: PET_APP_DIR,
     detached: true,
     stdio: "ignore",
