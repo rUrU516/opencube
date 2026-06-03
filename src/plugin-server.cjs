@@ -1,6 +1,7 @@
 const { quitPet, sendEvent, showPet } = require("./plugin-shared.cjs")
 
 const COMMAND_HANDLED_SENTINEL = "__OPENCODE_PET_COMMAND_HANDLED__"
+const CUB_ICON = "◈"
 
 function handled() {
   throw new Error(COMMAND_HANDLED_SENTINEL)
@@ -42,6 +43,10 @@ async function injectNotice(client, sessionID, text) {
   }
 }
 
+function cubNotice(text, icon = CUB_ICON) {
+  return `${icon} ${text}`
+}
+
 module.exports = {
   id: "opencode-pet",
   server: async ({ client }) => {
@@ -71,14 +76,20 @@ module.exports = {
         }
       },
 
-      "command.execute.before": async (input) => {
+      "command.execute.before": async (input, output) => {
         if (!["pet", "pet_stop", "pet_say_hello", "pet_fancy_say_hello"].includes(input.command)) return
+
+        // There is no official cancel primitive in command.execute.before yet.
+        // Throwing this sentinel aborts the command flow before opencode sends
+        // the slash-command prompt to the model. Desktop may show it as an
+        // "Unexpected server error" toast, but this is currently the only path
+        // that reliably prevents empty prompts / model continuation.
 
         if (shouldQuit(input)) {
           await quitPet()
-          await injectNotice(client, input.sessionID, "OpenCub is going to sleep 🐾")
+          await injectNotice(client, input.sessionID, cubNotice("OpenCub is going to sleep 🐾", "◌"))
         } else if (isSayHello(input)) {
-          await sendEvent({
+          const result = await sendEvent({
             type: "hello",
             message: "hello from opencode 🐾",
             command: input.command,
@@ -86,9 +97,13 @@ module.exports = {
             sessionID: input.sessionID,
             source: "opencode-pet-plugin",
           })
-          await injectNotice(client, input.sessionID, "OpenCub got your hello 🐾")
+          await injectNotice(
+            client,
+            input.sessionID,
+            result ? cubNotice("OpenCub got your hello 🐾", "✦") : cubNotice("OpenCub is sleeping... zzz  Use /pet to wake it.", "☾"),
+          )
         } else if (isFancySayHello(input)) {
-          await sendEvent({
+          const result = await sendEvent({
             type: "fancy_hello",
             message: "fancy hello light show from opencode ✨",
             command: input.command,
@@ -96,10 +111,17 @@ module.exports = {
             sessionID: input.sessionID,
             source: "opencode-pet-plugin",
           })
-          await injectNotice(client, input.sessionID, "OpenCub is putting on a light show ✨")
+          await injectNotice(
+            client,
+            input.sessionID,
+            result
+              ? cubNotice("OpenCub is putting on a light show ✨", "✺")
+              : cubNotice("OpenCub is sleeping... zzz  Start it with /pet before the light show.", "☾"),
+          )
         } else {
-          await showPet()
-          await injectNotice(client, input.sessionID, "OpenCub is awake 🐾")
+          await showPet({
+            onProgress: (message) => injectNotice(client, input.sessionID, message),
+          })
         }
 
         handled()
