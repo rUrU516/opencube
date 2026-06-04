@@ -174,6 +174,12 @@ function applyPermissionEvent(event) {
   }
 }
 
+function clearPendingPermissionsForSession(sessionID) {
+  for (const [requestID, permission] of pendingPermissionsByRequest) {
+    if (permission?.sessionID === sessionID) pendingPermissionsByRequest.delete(requestID)
+  }
+}
+
 function applyToolEvent(event) {
   if (!event || typeof event.sessionID !== "string" || typeof event.callID !== "string") return
   if (event.type !== "tool.start" && event.type !== "tool.finish") return
@@ -230,6 +236,7 @@ function applySessionEvent(event) {
 
   if (event.type === "session.idle") {
     activeToolsBySession.delete(event.sessionID)
+    clearPendingPermissionsForSession(event.sessionID)
     sessionMap.set(event.sessionID, {
       sessionID: event.sessionID,
       state: "idle",
@@ -251,6 +258,7 @@ function pruneIdleSessions(refresh = true) {
     if (session.state === "idle" && expiresFrom && now - expiresFrom > IDLE_TTL_MS) {
       sessionMap.delete(sessionID)
       activeToolsBySession.delete(sessionID)
+      clearPendingPermissionsForSession(sessionID)
       changed = true
     }
   }
@@ -889,9 +897,14 @@ function petHtml3D() {
       function updateToolParticles(sessions, dt, now) {
         const activeIDs = new Set()
         const emitters = []
+        const busyIDs = new Set(
+          sessions
+            .filter((session) => session?.state === "busy" && typeof session.sessionID === "string")
+            .map((session) => session.sessionID),
+        )
 
         for (const session of sessions) {
-          if (typeof session?.sessionID !== "string" || !session.activeTools?.length) continue
+          if (session?.state !== "busy" || typeof session.sessionID !== "string" || !session.activeTools?.length) continue
           const currentState = toolEmissionStates.get(session.sessionID)
           const faceName = sessionFaceMap.get(session.sessionID) || currentState?.faceName
           if (!faceName) continue
@@ -908,7 +921,7 @@ function petHtml3D() {
 
         for (const [sessionID, state] of Array.from(toolEmissionStates.entries())) {
           if (activeIDs.has(sessionID)) continue
-          if (!state?.faceName || state.holdUntil <= now) {
+          if (!busyIDs.has(sessionID) || !state?.faceName || state.holdUntil <= now) {
             toolEmissionStates.delete(sessionID)
             toolEmitAccumulators.delete(sessionID)
             continue
