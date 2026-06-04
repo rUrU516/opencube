@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, Tray, nativeImage, screen } = require("electron")
+const { app, BrowserWindow, Menu, Tray, nativeImage, screen, ipcMain } = require("electron")
 const fs = require("node:fs")
 const http = require("node:http")
 const os = require("node:os")
@@ -14,6 +14,7 @@ const STATE_FILE = path.join(DATA_DIR, "state.json")
 const PET_HTML_FILE = path.join(DATA_DIR, "pet.html")
 const ICON_PATH = process.env.OPENCODE_PET_ICON || path.join(__dirname, "..", "assets", "opencode-icon.png")
 const MAX_EVENTS = 100
+const MAX_INTERACTION_EVENTS = 80
 const IDLE_TTL_MS = 5 * 60 * 1000
 
 let petWindow = null
@@ -21,9 +22,28 @@ let panelWindow = null
 let tray = null
 let server = null
 let events = []
+let interactionEvents = []
 let petSignals = []
 let sessionMap = new Map()
 let cleanupTimer = null
+let dragState = null
+
+ipcMain.on("opencube-drag-start", (event, point) => {
+  if (!petWindow || petWindow.isDestroyed()) return
+  const [x, y] = petWindow.getPosition()
+  dragState = { windowX: x, windowY: y, screenX: point.screenX, screenY: point.screenY }
+})
+
+ipcMain.on("opencube-drag-move", (event, point) => {
+  if (!petWindow || petWindow.isDestroyed() || !dragState) return
+  const nextX = Math.round(dragState.windowX + point.screenX - dragState.screenX)
+  const nextY = Math.round(dragState.windowY + point.screenY - dragState.screenY)
+  petWindow.setPosition(nextX, nextY, false)
+})
+
+ipcMain.on("opencube-drag-end", () => {
+  dragState = null
+})
 
 function ensureDataDir() {
   fs.mkdirSync(DATA_DIR, { recursive: true })
@@ -123,6 +143,18 @@ function recordEvent(event) {
   events = events.slice(0, MAX_EVENTS)
   updatePanel()
   updatePet()
+  return item
+}
+
+function recordInteractionEvent(event) {
+  const item = {
+    id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    receivedAt: Date.now(),
+    ...event,
+  }
+  interactionEvents.unshift(item)
+  interactionEvents = interactionEvents.slice(0, MAX_INTERACTION_EVENTS)
+  updatePanel()
   return item
 }
 
@@ -231,6 +263,14 @@ function panelHtml() {
     })
     .join("")
 
+  const interactionRows = interactionEvents
+    .map((event) => {
+      const time = new Date(event.receivedAt).toLocaleTimeString()
+      const payload = JSON.stringify(event, null, 2)
+      return `<div class="event interaction"><div class="meta interaction-meta">${escapeHtml(time)} · ${escapeHtml(event.type || "interaction")}</div><pre>${escapeHtml(payload)}</pre></div>`
+    })
+    .join("")
+
   return `<!doctype html>
 <html>
   <head>
@@ -240,17 +280,31 @@ function panelHtml() {
       .panel { box-sizing: border-box; width: 100%; height: 100%; padding: 12px; border-radius: 16px; background: rgba(24, 24, 27, 0.94); color: white; box-shadow: 0 14px 42px rgba(0,0,0,.28); overflow: hidden; }
       .header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; font-size: 13px; font-weight: 700; }
       .hint { color: rgba(255,255,255,.6); font-size: 11px; font-weight: 500; }
-      .list { height: 292px; overflow: auto; padding-right: 4px; }
+      .columns { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; height: 316px; }
+      .section { min-width: 0; overflow: hidden; display: flex; flex-direction: column; }
+      .section-title { display: flex; justify-content: space-between; color: rgba(255,255,255,.72); font-size: 11px; font-weight: 700; margin: 0 2px 6px; }
+      .list { flex: 1; overflow: auto; padding-right: 4px; }
       .empty { color: rgba(255,255,255,.6); font-size: 13px; padding: 18px 4px; }
       .event { border: 1px solid rgba(255,255,255,.12); border-radius: 10px; padding: 8px; margin-bottom: 8px; background: rgba(255,255,255,.06); }
+      .event.interaction { background: rgba(56,189,248,.08); border-color: rgba(56,189,248,.18); }
       .meta { color: #a7f3d0; font-size: 11px; margin-bottom: 5px; }
+      .interaction-meta { color: #93c5fd; }
       pre { margin: 0; color: rgba(255,255,255,.88); white-space: pre-wrap; word-break: break-word; font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; }
     </style>
   </head>
   <body>
     <div class="panel">
-      <div class="header"><span>opencode pet inbox</span><span class="hint">${events.length}/${MAX_EVENTS}</span></div>
-      <div class="list">${rows || `<div class="empty">还没有收到事件。试试 /pet 或 /pet_stop。</div>`}</div>
+      <div class="header"><span>OpenCube inbox</span><span class="hint">events ${events.length}/${MAX_EVENTS} · input ${interactionEvents.length}/${MAX_INTERACTION_EVENTS}</span></div>
+      <div class="columns">
+        <section class="section">
+          <div class="section-title"><span>HTTP / hook events</span><span>${events.length}</span></div>
+          <div class="list">${rows || `<div class="empty">还没有收到事件。</div>`}</div>
+        </section>
+        <section class="section">
+          <div class="section-title"><span>Mouse / keyboard</span><span>${interactionEvents.length}</span></div>
+          <div class="list">${interactionRows || `<div class="empty">还没有捕捉到输入事件。</div>`}</div>
+        </section>
+      </div>
     </div>
   </body>
 </html>`
@@ -549,7 +603,7 @@ function petHtml3D() {
         height: 100%;
         position: relative;
         background: transparent;
-        -webkit-app-region: drag;
+        -webkit-app-region: no-drag;
         user-select: none;
       }
       #scene {
@@ -559,11 +613,18 @@ function petHtml3D() {
         height: 100%;
         pointer-events: none;
       }
+      #hit-layer {
+        position: absolute;
+        inset: 0;
+        background: transparent;
+        -webkit-app-region: no-drag;
+      }
     </style>
   </head>
   <body>
     <div class="stage" title="opencode pet：拖拽移动，右键打开菜单">
       <canvas id="scene" aria-label="3D opencode pet"></canvas>
+      <div id="hit-layer" aria-label="OpenCube interaction layer"></div>
     </div>
     <script>
       window.__PET_BOOT_ERROR = null
@@ -576,9 +637,11 @@ function petHtml3D() {
     </script>
     <script>
       const THREE = require(${threeCjsPath})
+      const { ipcRenderer } = require("electron")
 
       window.__PET_STATE = ${initialStateJson}
       const stage = document.querySelector(".stage")
+      const hitLayer = document.getElementById("hit-layer")
       const faceOrder = ["front", "right", "top", "back", "left", "bottom"]
       const sessionFaceMap = new Map()
       const sessionColorMap = new Map()
@@ -594,6 +657,9 @@ function petHtml3D() {
       let torque = { x: 0, y: 0, z: 0 }
       let nextTorqueAt = 0
       let wasBusy = false
+      let frictionHoldActive = false
+      let frictionHoldLevel = 0
+      let leftDragActive = false
       let latestDebug = { now: Date.now(), busy: 0, rotation, angularVelocity, torque, speed: 0, faceRotations: {} }
 
       const canvas = document.getElementById("scene")
@@ -651,6 +717,113 @@ function petHtml3D() {
       }
       window.addEventListener("resize", resize)
       resize()
+
+      function postInteraction(event) {
+        fetch("http://${HOST}:${PORT}/interaction", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            ...event,
+            source: "opencube-renderer",
+            frictionHoldActive,
+            frictionHoldLevel,
+            frictionHoldMultiplier: 1 + frictionHoldLevel,
+          }),
+        }).catch(() => {})
+      }
+
+      function pointerPayload(type, event) {
+        return {
+          type,
+          nativeType: event.type,
+          pointerId: event.pointerId,
+          pointerType: event.pointerType,
+          button: event.button,
+          buttons: event.buttons,
+          screenX: Math.round(event.screenX || 0),
+          screenY: Math.round(event.screenY || 0),
+          clientX: Math.round(event.clientX),
+          clientY: Math.round(event.clientY),
+          altKey: event.altKey,
+          ctrlKey: event.ctrlKey,
+          metaKey: event.metaKey,
+          shiftKey: event.shiftKey,
+          target: "cube",
+        }
+      }
+
+      function beginFrictionHold(event) {
+        if (event.button !== 2) return
+        event.preventDefault()
+        try { hitLayer.setPointerCapture(event.pointerId) } catch {}
+        frictionHoldActive = true
+        postInteraction(pointerPayload("mouse.right.down", event))
+      }
+
+      function endFrictionHold(event) {
+        if (event && event.button !== undefined && event.button !== 2) return
+        if (frictionHoldActive) postInteraction(pointerPayload("mouse.right.up", event || { button: 2, buttons: 0, clientX: 0, clientY: 0 }))
+        frictionHoldActive = false
+      }
+
+      function beginLeftDrag(event) {
+        if (event.button !== 0) return
+        event.preventDefault()
+        try { hitLayer.setPointerCapture(event.pointerId) } catch {}
+        leftDragActive = true
+        ipcRenderer.send("opencube-drag-start", { screenX: event.screenX, screenY: event.screenY })
+      }
+
+      function moveLeftDrag(event) {
+        if (!leftDragActive) return
+        event.preventDefault()
+        ipcRenderer.send("opencube-drag-move", { screenX: event.screenX, screenY: event.screenY })
+      }
+
+      function endLeftDrag(event) {
+        if (!leftDragActive) return
+        leftDragActive = false
+        ipcRenderer.send("opencube-drag-end")
+      }
+
+      function updateFrictionHold(dt) {
+        const growPerSecond = 2.4
+        const recoverPerSecond = 8.0
+        if (frictionHoldActive) {
+          frictionHoldLevel = Math.min(11, frictionHoldLevel + growPerSecond * dt)
+        } else {
+          frictionHoldLevel = Math.max(0, frictionHoldLevel - recoverPerSecond * dt)
+        }
+        return 1 + frictionHoldLevel
+      }
+
+      hitLayer.addEventListener("pointerdown", (event) => {
+        if (event.button === 0) beginLeftDrag(event)
+        if (event.button === 2) beginFrictionHold(event)
+      })
+      hitLayer.addEventListener("pointermove", moveLeftDrag)
+      hitLayer.addEventListener("pointerup", (event) => {
+        if (event.button === 0) endLeftDrag(event)
+        if (event.button === 2) endFrictionHold(event)
+      })
+      hitLayer.addEventListener("pointercancel", (event) => {
+        endLeftDrag(event)
+        endFrictionHold(event)
+      })
+      hitLayer.addEventListener("contextmenu", (event) => {
+        event.preventDefault()
+        postInteraction(pointerPayload("mouse.right.contextmenu", event))
+      })
+      window.addEventListener("keydown", (event) => postInteraction({ type: "keyboard.down", key: event.key, code: event.code, altKey: event.altKey, ctrlKey: event.ctrlKey, metaKey: event.metaKey, shiftKey: event.shiftKey }))
+      window.addEventListener("keyup", (event) => postInteraction({ type: "keyboard.up", key: event.key, code: event.code, altKey: event.altKey, ctrlKey: event.ctrlKey, metaKey: event.metaKey, shiftKey: event.shiftKey }))
+      document.addEventListener("mouseup", endFrictionHold)
+      window.addEventListener("mouseup", endFrictionHold)
+      window.addEventListener("pointerup", endFrictionHold)
+      window.addEventListener("pointercancel", () => endFrictionHold())
+      window.addEventListener("blur", () => {
+        endLeftDrag()
+        endFrictionHold()
+      })
 
       function randomBetween(min, max) {
         return min + Math.random() * (max - min)
@@ -961,7 +1134,9 @@ function petHtml3D() {
         stage.classList.toggle("has-sessions", sessions.length > 0)
 
         const inertia = 1.18
-        const friction = isBusy ? 0.58 : 2.85
+        const baseFriction = isBusy ? 0.58 : 2.85
+        const holdMultiplier = updateFrictionHold(dt)
+        const friction = baseFriction * holdMultiplier
         angularVelocity.x += (torque.x / inertia) * dt
         angularVelocity.y += (torque.y / inertia) * dt
         angularVelocity.z += (torque.z / inertia) * dt
@@ -992,6 +1167,11 @@ function petHtml3D() {
           rotation: { ...rotation },
           angularVelocity: { ...angularVelocity },
           torque: { ...torque },
+          friction,
+          baseFriction,
+          frictionHoldActive,
+          frictionHoldMultiplier: holdMultiplier,
+          frictionHoldLevel,
           speed,
           speedRatio,
           nextTorqueAt,
@@ -1079,8 +1259,8 @@ function createPanelWindow() {
   if (panelWindow && !panelWindow.isDestroyed()) return panelWindow
 
   panelWindow = new BrowserWindow({
-    width: 360,
-    height: 360,
+    width: 680,
+    height: 420,
     show: false,
     frame: false,
     resizable: false,
@@ -1238,6 +1418,12 @@ function startServer() {
       if (req.method === "POST" && url.pathname === "/event") {
         const body = await readRequestJson(req)
         const item = recordEvent(body)
+        return json(res, 200, { ok: true, event: item })
+      }
+
+      if (req.method === "POST" && url.pathname === "/interaction") {
+        const body = await readRequestJson(req)
+        const item = recordInteractionEvent(body)
         return json(res, 200, { ok: true, event: item })
       }
 
