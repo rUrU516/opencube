@@ -25,6 +25,7 @@ let events = []
 let interactionEvents = []
 let petSignals = []
 let sessionMap = new Map()
+let activeToolsBySession = new Map()
 let cleanupTimer = null
 let dragState = null
 
@@ -129,6 +130,7 @@ function recordEvent(event) {
     ...event,
   }
   applySessionEvent(item)
+  applyToolEvent(item)
   if (item.type === "hello" || item.type === "fancy_hello") {
     petSignals.push({
       id: item.id,
@@ -144,6 +146,29 @@ function recordEvent(event) {
   updatePanel()
   updatePet()
   return item
+}
+
+function applyToolEvent(event) {
+  if (!event || typeof event.sessionID !== "string" || typeof event.callID !== "string") return
+  if (event.type !== "tool.start" && event.type !== "tool.finish") return
+
+  let tools = activeToolsBySession.get(event.sessionID)
+  if (!tools) {
+    tools = new Map()
+    activeToolsBySession.set(event.sessionID, tools)
+  }
+
+  if (event.type === "tool.start") {
+    tools.set(event.callID, {
+      callID: event.callID,
+      tool: event.tool,
+      startedAt: event.receivedAt || Date.now(),
+    })
+    return
+  }
+
+  tools.delete(event.callID)
+  if (tools.size === 0) activeToolsBySession.delete(event.sessionID)
 }
 
 function recordInteractionEvent(event) {
@@ -198,6 +223,7 @@ function pruneIdleSessions(refresh = true) {
     const expiresFrom = session.idleAt || session.lastAt
     if (session.state === "idle" && expiresFrom && now - expiresFrom > IDLE_TTL_MS) {
       sessionMap.delete(sessionID)
+      activeToolsBySession.delete(sessionID)
       changed = true
     }
   }
@@ -219,6 +245,7 @@ function getPetState() {
       ball: { size: 14 },
     },
     sessions: Array.from(sessionMap.values()).map((session, index) => ({
+      activeTools: Array.from(activeToolsBySession.get(session.sessionID)?.values() || []),
       sessionID: session.sessionID,
       state: session.state,
       busyAt: session.busyAt,
@@ -677,6 +704,8 @@ function petHtml3D() {
       const dragParticleGroup = new THREE.Group()
       dragParticleGroup.position.z = 0.88
       scene.add(dragParticleGroup)
+      const toolParticleGroup = new THREE.Group()
+      scene.add(toolParticleGroup)
       const iconTexture = new THREE.TextureLoader().load("${iconUrl}")
       iconTexture.colorSpace = THREE.SRGBColorSpace
       iconTexture.generateMipmaps = false
@@ -720,8 +749,8 @@ function petHtml3D() {
         const ctx = canvas.getContext("2d")
         const gradient = ctx.createRadialGradient(48, 48, 1, 48, 48, 45)
         gradient.addColorStop(0, "rgba(255,255,255,1)")
-        gradient.addColorStop(0.26, "rgba(255,255,255,1)")
-        gradient.addColorStop(0.66, "rgba(255,255,255,.48)")
+        gradient.addColorStop(0.24, "rgba(255,255,255,1)")
+        gradient.addColorStop(0.52, "rgba(255,255,255,.52)")
         gradient.addColorStop(1, "rgba(255,255,255,0)")
         ctx.fillStyle = gradient
         ctx.fillRect(0, 0, 96, 96)
@@ -731,6 +760,16 @@ function petHtml3D() {
       }
 
       const dragParticles = []
+      const toolParticles = []
+      const toolEmitAccumulators = new Map()
+      const faceVectors = {
+        front: { position: new THREE.Vector3(0, 0, 0.34), normal: new THREE.Vector3(0, 0, 1) },
+        back: { position: new THREE.Vector3(0, 0, -0.34), normal: new THREE.Vector3(0, 0, -1) },
+        right: { position: new THREE.Vector3(0.34, 0, 0), normal: new THREE.Vector3(1, 0, 0) },
+        left: { position: new THREE.Vector3(-0.34, 0, 0), normal: new THREE.Vector3(-1, 0, 0) },
+        top: { position: new THREE.Vector3(0, 0.34, 0), normal: new THREE.Vector3(0, 1, 0) },
+        bottom: { position: new THREE.Vector3(0, -0.34, 0), normal: new THREE.Vector3(0, -1, 0) },
+      }
 
       function createDragParticles() {
         const geometry = new THREE.PlaneGeometry(0.086, 0.086)
@@ -756,6 +795,107 @@ function petHtml3D() {
           dragParticleGroup.add(particle)
           dragParticles.push(particle)
         }
+      }
+
+      function createToolParticles() {
+        for (let index = 0; index < 56; index++) {
+          const material = new THREE.SpriteMaterial({
+            map: dragParticleTexture,
+            color: 0xffffff,
+            transparent: true,
+            opacity: 0,
+            blending: THREE.AdditiveBlending,
+            depthWrite: false,
+          })
+          const particle = new THREE.Sprite(material)
+          particle.userData = {
+            active: false,
+            life: 0,
+            maxLife: 1,
+            velocity: new THREE.Vector3(),
+            size: 0.06,
+          }
+          toolParticleGroup.add(particle)
+          toolParticles.push(particle)
+        }
+      }
+
+      function colorToThree(color) {
+        return new THREE.Color((color?.r ?? 255) / 255, (color?.g ?? 255) / 255, (color?.b ?? 255) / 255)
+      }
+
+      function emitToolParticle(faceName, color) {
+        const face = faceVectors[faceName]
+        if (!face) return false
+        const particle = toolParticles.find((item) => !item.userData.active)
+        if (!particle) return false
+
+        const origin = face.position.clone()
+        const normal = face.normal.clone()
+        cubeGroup.localToWorld(origin)
+        normal.applyQuaternion(cubeGroup.quaternion).normalize()
+
+        const basis = Math.abs(normal.y) > 0.82 ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 1, 0)
+        const tangentA = new THREE.Vector3().crossVectors(normal, basis).normalize()
+        const tangentB = new THREE.Vector3().crossVectors(normal, tangentA).normalize()
+
+        const data = particle.userData
+        data.active = true
+        data.life = 0
+        data.maxLife = randomBetween(0.45, 0.78)
+        data.size = randomBetween(0.062, 0.115)
+        data.velocity.copy(normal).multiplyScalar(randomBetween(1.45, 2.35))
+        data.velocity.add(tangentA.multiplyScalar(randomBetween(-0.32, 0.32)))
+        data.velocity.add(tangentB.multiplyScalar(randomBetween(-0.32, 0.32)))
+        particle.position.copy(origin).add(normal.clone().multiplyScalar(0.035))
+        particle.scale.setScalar(data.size)
+        particle.material.color.copy(colorToThree(color))
+        particle.material.opacity = 0.92
+        return true
+      }
+
+      function updateToolParticles(sessions, dt) {
+        const activeToolSessions = sessions.filter((session) => session.state === "busy" && session.activeTools?.length > 0)
+        const activeIDs = new Set(activeToolSessions.map((session) => session.sessionID))
+        for (const sessionID of Array.from(toolEmitAccumulators.keys())) {
+          if (!activeIDs.has(sessionID)) toolEmitAccumulators.delete(sessionID)
+        }
+
+        for (const session of activeToolSessions) {
+          const faceName = sessionFaceMap.get(session.sessionID)
+          if (!faceName) continue
+          const color = sessionColorMap.get(session.sessionID) || randomSessionGlowColor()
+          const jitterRate = randomBetween(7.5, 11.5)
+          const next = (toolEmitAccumulators.get(session.sessionID) || 0) + dt * jitterRate
+          let accumulator = next
+          while (accumulator >= 1) {
+            if (!emitToolParticle(faceName, color)) break
+            accumulator -= 1
+          }
+          toolEmitAccumulators.set(session.sessionID, accumulator)
+        }
+
+        let activeCount = 0
+        for (const particle of toolParticles) {
+          const data = particle.userData
+          if (!data.active) {
+            particle.material.opacity = 0
+            continue
+          }
+          data.life += dt
+          if (data.life >= data.maxLife) {
+            data.active = false
+            particle.material.opacity = 0
+            continue
+          }
+          activeCount += 1
+          const age = data.life / data.maxLife
+          particle.position.addScaledVector(data.velocity, dt)
+          particle.scale.setScalar(data.size * (1.02 + age * 0.42))
+          particle.material.opacity = Math.min(1, 0.24 + Math.sin(age * Math.PI) * 1.18)
+        }
+        toolParticleGroup.visible = activeCount > 0 || activeToolSessions.length > 0
+        return { activeSessions: activeToolSessions.length, activeCount }
       }
 
       function activeDragColors() {
@@ -1032,6 +1172,7 @@ function petHtml3D() {
       createFace("top", [0, 0.30, 0], [-Math.PI / 2, 0, rad(faceRotations.top || 0)], [0, 0.314, 0])
       createFace("bottom", [0, -0.30, 0], [Math.PI / 2, 0, rad(faceRotations.bottom || 0)], [0, -0.314, 0])
       createDragParticles()
+      createToolParticles()
 
       function createFace(name, position, rotation, glowPosition) {
         const face = new THREE.Mesh(faceGeometry, iconMaterial.clone())
@@ -1285,6 +1426,10 @@ function petHtml3D() {
         rotation.x += angularVelocity.x * dt
         rotation.y += angularVelocity.y * dt
         rotation.z += angularVelocity.z * dt
+        cubeGroup.rotation.x = rad(rotation.x)
+        cubeGroup.rotation.y = rad(rotation.y)
+        cubeGroup.rotation.z = rad(rotation.z)
+        cubeGroup.updateMatrixWorld(true)
 
         const speed = magnitude(angularVelocity)
         const speedRatio = Math.min(1, speed / 1400)
@@ -1294,6 +1439,7 @@ function petHtml3D() {
         const glowB = Math.round(232 + (210 - 232) * glow)
         const dragParticles = updateDragParticles(now, frictionHoldLevel, speed, dt)
         const busyFaces = syncBusyFaces(sessions, speed)
+        const toolParticles = updateToolParticles(sessions, dt)
         processSignals(snapshot.signals || [], now)
         const helloFlashes = applyFlashFaces(now)
         renderCube()
@@ -1314,6 +1460,7 @@ function petHtml3D() {
           nextTorqueAt,
           glow,
           dragParticles,
+          toolParticles,
           colorReleaseSpeed,
           glowColor: { r: glowR, g: glowG, b: glowB },
           faceRotations,
