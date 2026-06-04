@@ -792,6 +792,8 @@ function petHtml3D() {
       const dragParticles = []
       const toolParticles = []
       const toolEmitAccumulators = new Map()
+      const toolEmissionStates = new Map()
+      const toolEmissionHoldMs = 2000
       const faceVectors = {
         front: { position: new THREE.Vector3(0, 0, 0.34), normal: new THREE.Vector3(0, 0, 1) },
         back: { position: new THREE.Vector3(0, 0, -0.34), normal: new THREE.Vector3(0, 0, -1) },
@@ -884,25 +886,56 @@ function petHtml3D() {
         return true
       }
 
-      function updateToolParticles(sessions, dt) {
-        const activeToolSessions = sessions.filter((session) => session.state === "busy" && session.activeTools?.length > 0)
-        const activeIDs = new Set(activeToolSessions.map((session) => session.sessionID))
-        for (const sessionID of Array.from(toolEmitAccumulators.keys())) {
-          if (!activeIDs.has(sessionID)) toolEmitAccumulators.delete(sessionID)
+      function updateToolParticles(sessions, dt, now) {
+        const activeIDs = new Set()
+        const emitters = []
+
+        for (const session of sessions) {
+          if (typeof session?.sessionID !== "string" || !session.activeTools?.length) continue
+          const currentState = toolEmissionStates.get(session.sessionID)
+          const faceName = sessionFaceMap.get(session.sessionID) || currentState?.faceName
+          if (!faceName) continue
+          const color = sessionColorMap.get(session.sessionID) || currentState?.color || randomSessionGlowColor()
+
+          activeIDs.add(session.sessionID)
+          toolEmissionStates.set(session.sessionID, {
+            faceName,
+            color,
+            holdUntil: now + toolEmissionHoldMs,
+          })
+          emitters.push({ sessionID: session.sessionID, faceName, color, held: false, holdRemainingMs: toolEmissionHoldMs })
         }
 
-        for (const session of activeToolSessions) {
-          const faceName = sessionFaceMap.get(session.sessionID)
-          if (!faceName) continue
-          const color = sessionColorMap.get(session.sessionID) || randomSessionGlowColor()
+        for (const [sessionID, state] of Array.from(toolEmissionStates.entries())) {
+          if (activeIDs.has(sessionID)) continue
+          if (!state?.faceName || state.holdUntil <= now) {
+            toolEmissionStates.delete(sessionID)
+            toolEmitAccumulators.delete(sessionID)
+            continue
+          }
+          emitters.push({
+            sessionID,
+            faceName: state.faceName,
+            color: state.color || randomSessionGlowColor(),
+            held: true,
+            holdRemainingMs: state.holdUntil - now,
+          })
+        }
+
+        const emittingIDs = new Set(emitters.map((emitter) => emitter.sessionID))
+        for (const sessionID of Array.from(toolEmitAccumulators.keys())) {
+          if (!emittingIDs.has(sessionID)) toolEmitAccumulators.delete(sessionID)
+        }
+
+        for (const emitter of emitters) {
           const jitterRate = randomBetween(7.5, 11.5)
-          const next = (toolEmitAccumulators.get(session.sessionID) || 0) + dt * jitterRate
+          const next = (toolEmitAccumulators.get(emitter.sessionID) || 0) + dt * jitterRate
           let accumulator = next
           while (accumulator >= 1) {
-            if (!emitToolParticle(faceName, color)) break
+            if (!emitToolParticle(emitter.faceName, emitter.color)) break
             accumulator -= 1
           }
-          toolEmitAccumulators.set(session.sessionID, accumulator)
+          toolEmitAccumulators.set(emitter.sessionID, accumulator)
         }
 
         let activeCount = 0
@@ -924,8 +957,9 @@ function petHtml3D() {
           particle.scale.setScalar(data.size * (1.02 + age * 0.42))
           particle.material.opacity = Math.min(1, 0.24 + Math.sin(age * Math.PI) * 1.18)
         }
-        toolParticleGroup.visible = activeCount > 0 || activeToolSessions.length > 0
-        return { activeSessions: activeToolSessions.length, activeCount }
+        const heldSessions = emitters.filter((emitter) => emitter.held).length
+        toolParticleGroup.visible = activeCount > 0 || emitters.length > 0
+        return { activeSessions: activeIDs.size, emittingSessions: emitters.length, heldSessions, activeCount }
       }
 
       function activeDragColors() {
@@ -1515,7 +1549,7 @@ function petHtml3D() {
         const glowB = Math.round(232 + (210 - 232) * glow)
         const dragParticles = updateDragParticles(now, frictionHoldLevel, speed, dt)
         const busyFaces = syncBusyFaces(sessions, speed)
-        const toolParticles = updateToolParticles(sessions, dt)
+        const toolParticles = updateToolParticles(sessions, dt, now)
         processSignals(snapshot.signals || [], now)
         const helloFlashes = applyFlashFaces(now)
         const permissionGlows = applyPermissionGlowFaces(snapshot.permissions || [], now)
