@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, screen } = require("electron")
+const { app, BrowserWindow, Menu, Tray, nativeImage, screen } = require("electron")
 const fs = require("node:fs")
 const http = require("node:http")
 const os = require("node:os")
@@ -18,6 +18,7 @@ const IDLE_TTL_MS = 5 * 60 * 1000
 
 let petWindow = null
 let panelWindow = null
+let tray = null
 let server = null
 let events = []
 let petSignals = []
@@ -1063,11 +1064,9 @@ function createPetWindow() {
   })
   petWindow.setAlwaysOnTop(true, "floating")
   petWindow.loadFile(writePetHtmlFile())
-  petWindow.webContents.on("context-menu", () => buildMenu().popup({ window: petWindow }))
   petWindow.on("moved", () => {
     const [x, y] = petWindow.getPosition()
     writeState({ visible: true, x, y })
-    positionPanel()
   })
   petWindow.on("closed", () => {
     petWindow = null
@@ -1104,14 +1103,28 @@ function createPanelWindow() {
 }
 
 function positionPanel() {
-  if (!petWindow || petWindow.isDestroyed() || !panelWindow || panelWindow.isDestroyed()) return
-  const [x, y] = petWindow.getPosition()
-  const petBounds = petWindow.getBounds()
+  if (!panelWindow || panelWindow.isDestroyed()) return
   const panelBounds = panelWindow.getBounds()
-  const display = screen.getDisplayNearestPoint({ x, y }).workArea
-  let nextX = x - panelBounds.width - 10
-  let nextY = y
-  if (nextX < display.x) nextX = x + petBounds.width + 10
+  const anchor = tray && !tray.isDestroyed() ? tray.getBounds() : undefined
+  const display = anchor
+    ? screen.getDisplayNearestPoint({ x: anchor.x, y: anchor.y }).workArea
+    : screen.getPrimaryDisplay().workArea
+
+  let nextX = anchor
+    ? Math.round(anchor.x + anchor.width / 2 - panelBounds.width / 2)
+    : display.x + display.width - panelBounds.width - 16
+  let nextY = anchor
+    ? Math.round(anchor.y + anchor.height + 8)
+    : display.y + 36
+
+  // If the menu bar reports a coordinate outside the workArea, keep the panel
+  // as a standalone top-right popover instead of attaching it to the cube.
+  if (!anchor || nextY < display.y || nextY > display.y + display.height) {
+    nextX = display.x + display.width - panelBounds.width - 16
+    nextY = display.y + 36
+  }
+
+  if (nextX < display.x) nextX = display.x + 8
   if (nextX + panelBounds.width > display.x + display.width) nextX = display.x + display.width - panelBounds.width - 8
   if (nextY + panelBounds.height > display.y + display.height) nextY = display.y + display.height - panelBounds.height - 8
   if (nextY < display.y) nextY = display.y + 8
@@ -1119,7 +1132,6 @@ function positionPanel() {
 }
 
 function showPanel() {
-  showPet()
   const win = createPanelWindow()
   updatePanel()
   positionPanel()
@@ -1151,13 +1163,30 @@ function hidePet() {
 
 function buildMenu() {
   return Menu.buildFromTemplate([
-    { label: "Show Pet", click: showPet },
+    { label: "Show OpenCube", click: showPet },
+    { label: "Hide OpenCube", click: hidePet },
+    { type: "separator" },
     { label: "Show Inbox", click: showPanel },
-    { label: "Hide Pet", click: hidePet },
     { label: "Hide Inbox", click: hidePanel },
     { type: "separator" },
-    { label: "Quit Pet", click: () => app.quit() },
+    { label: "Quit OpenCube", click: () => app.quit() },
   ])
+}
+
+function createTray() {
+  if (tray) return tray
+  let image = nativeImage.createFromPath(ICON_PATH)
+  if (image.isEmpty()) {
+    image = nativeImage.createFromDataURL(
+      "data:image/svg+xml;utf8," +
+        encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><rect x="4" y="4" width="24" height="24" rx="6" fill="#111"/><rect x="11" y="8" width="10" height="16" rx="2" fill="#fff"/><rect x="14" y="12" width="5" height="9" rx="1" fill="#111"/></svg>`),
+    )
+  }
+  image = image.resize({ width: 18, height: 18 })
+  tray = new Tray(image)
+  tray.setToolTip("OpenCube")
+  tray.setContextMenu(buildMenu())
+  return tray
 }
 
 function startServer() {
@@ -1242,6 +1271,7 @@ function startServer() {
 function start() {
   app.dock?.hide()
   writeState({ visible: false, mode: "floating" })
+  createTray()
   startServer()
   cleanupTimer = setInterval(() => pruneIdleSessions(true), 30 * 1000)
   cleanupTimer.unref?.()
