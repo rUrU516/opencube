@@ -139,6 +139,36 @@ module.exports = {
       },
 
       event: async ({ event }) => {
+        if (event.type === "permission.asked") {
+          const permission = event.properties || {}
+          await sendEvent({
+            type: "permission.ask",
+            message: "opencode is waiting for permission",
+            sessionID: permission.sessionID,
+            requestID: permission.id,
+            permission: permission.permission,
+            patterns: permission.patterns,
+            metadata: permission.metadata,
+            always: permission.always,
+            tool: permission.tool,
+            source: "opencube-plugin",
+          })
+          return
+        }
+
+        if (event.type === "permission.replied") {
+          const permission = event.properties || {}
+          await sendEvent({
+            type: "permission.reply",
+            message: "opencode permission was answered",
+            sessionID: permission.sessionID,
+            requestID: permission.requestID,
+            reply: permission.reply,
+            source: "opencube-plugin",
+          })
+          return
+        }
+
         if (event.type !== "session.status") return
 
         const sessionID = event.properties?.sessionID
