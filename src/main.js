@@ -949,9 +949,12 @@ function petHtml3D() {
         const busyCount = sessions.filter((session) => session.state === "busy").length
         const isBusy = busyCount > 0
 
-        if (isBusy && !wasBusy) setNextTorque(now)
-        if (isBusy && now >= nextTorqueAt) setNextTorque(now)
-        if (!isBusy) torque = { x: 0, y: 0, z: 0 }
+        // Keep the same randomized torque model in both busy and idle modes.
+        // Busy uses low friction, so the cube accelerates into active motion.
+        // Idle keeps receiving random torque, but high friction turns it into a
+        // subtle breathing/drifting motion instead of stopping completely.
+        if (isBusy !== wasBusy) setNextTorque(now)
+        if (now >= nextTorqueAt) setNextTorque(now)
         wasBusy = isBusy
         stage.classList.toggle("has-busy", isBusy)
         stage.classList.toggle("has-sessions", sessions.length > 0)
@@ -984,6 +987,7 @@ function petHtml3D() {
         latestDebug = {
           now: Date.now(),
           busy: busyCount,
+          mode: isBusy ? "busy" : "idle",
           rotation: { ...rotation },
           angularVelocity: { ...angularVelocity },
           torque: { ...torque },
