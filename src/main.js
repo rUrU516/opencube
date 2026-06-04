@@ -660,6 +660,7 @@ function petHtml3D() {
       let frictionHoldActive = false
       let frictionHoldLevel = 0
       let leftDragActive = false
+      let dragEmitAccumulator = 0
       let latestDebug = { now: Date.now(), busy: 0, rotation, angularVelocity, torque, speed: 0, faceRotations: {} }
 
       const canvas = document.getElementById("scene")
@@ -673,6 +674,9 @@ function petHtml3D() {
 
       const cubeGroup = new THREE.Group()
       scene.add(cubeGroup)
+      const dragParticleGroup = new THREE.Group()
+      dragParticleGroup.position.z = 0.88
+      scene.add(dragParticleGroup)
       const iconTexture = new THREE.TextureLoader().load("${iconUrl}")
       iconTexture.colorSpace = THREE.SRGBColorSpace
       iconTexture.generateMipmaps = false
@@ -686,6 +690,7 @@ function petHtml3D() {
         side: THREE.DoubleSide,
       })
       const glowTexture = createGlowTexture()
+      const dragParticleTexture = createDragParticleTexture()
       const faceGeometry = new THREE.PlaneGeometry(0.60, 0.60)
       const glowGeometry = new THREE.PlaneGeometry(1.18, 1.18)
       const rad = THREE.MathUtils.degToRad
@@ -706,6 +711,136 @@ function petHtml3D() {
         const texture = new THREE.CanvasTexture(canvas)
         texture.colorSpace = THREE.SRGBColorSpace
         return texture
+      }
+
+      function createDragParticleTexture() {
+        const canvas = document.createElement("canvas")
+        canvas.width = 96
+        canvas.height = 96
+        const ctx = canvas.getContext("2d")
+        const gradient = ctx.createRadialGradient(48, 48, 1, 48, 48, 45)
+        gradient.addColorStop(0, "rgba(255,255,255,1)")
+        gradient.addColorStop(0.26, "rgba(255,255,255,1)")
+        gradient.addColorStop(0.66, "rgba(255,255,255,.48)")
+        gradient.addColorStop(1, "rgba(255,255,255,0)")
+        ctx.fillStyle = gradient
+        ctx.fillRect(0, 0, 96, 96)
+        const texture = new THREE.CanvasTexture(canvas)
+        texture.colorSpace = THREE.SRGBColorSpace
+        return texture
+      }
+
+      const dragParticles = []
+
+      function createDragParticles() {
+        const geometry = new THREE.PlaneGeometry(0.086, 0.086)
+        for (let index = 0; index < 34; index++) {
+          const material = new THREE.MeshBasicMaterial({
+            map: dragParticleTexture,
+            color: new THREE.Color(1, 1, 1),
+            transparent: true,
+            opacity: 0,
+            blending: THREE.AdditiveBlending,
+            depthWrite: false,
+            side: THREE.DoubleSide,
+          })
+          const particle = new THREE.Mesh(geometry, material)
+          particle.userData = {
+            active: false,
+            life: 0,
+            maxLife: 1,
+            vx: 0,
+            vy: 0,
+            size: randomBetween(0.72, 1.28),
+          }
+          dragParticleGroup.add(particle)
+          dragParticles.push(particle)
+        }
+      }
+
+      function activeDragColors() {
+        const colors = []
+        for (const color of sessionColorMap.values()) {
+          if (color && Number.isFinite(color.r) && Number.isFinite(color.g) && Number.isFinite(color.b)) colors.push(color)
+        }
+        return colors
+      }
+
+      function monochromeDragColor(index, cycle) {
+        const value = 0.26 + ((index % 5) / 4) * 0.56 + Math.sin(cycle * Math.PI) * 0.12
+        const clamped = Math.max(0.18, Math.min(0.92, value))
+        return { r: Math.round(clamped * 255), g: Math.round(clamped * 255), b: Math.round(clamped * 255) }
+      }
+
+      function chooseDragParticleColor(index, palette) {
+        if (palette.length > 0) return palette[index % palette.length]
+        const value = index % 2 === 0 ? 238 : 32
+        return { r: value, g: value, b: value }
+      }
+
+      function emitDragParticle(palette) {
+        const particle = dragParticles.find((item) => !item.userData.active)
+        if (!particle) return false
+        const data = particle.userData
+        const angle = randomBetween(0, Math.PI * 2)
+        const startRadius = randomBetween(0.16, 0.30)
+        const velocity = randomBetween(0.10, 0.20)
+        const tangent = randomBetween(-0.045, 0.045)
+        const color = chooseDragParticleColor(Math.floor(randomBetween(0, 1000)), palette)
+        data.active = true
+        data.life = 0
+        data.maxLife = randomBetween(1.15, 1.9)
+        data.vx = Math.cos(angle) * velocity + Math.cos(angle + Math.PI / 2) * tangent
+        data.vy = Math.sin(angle) * velocity + Math.sin(angle + Math.PI / 2) * tangent
+        data.size = randomBetween(0.92, 1.52)
+        particle.position.x = Math.cos(angle) * startRadius
+        particle.position.y = Math.sin(angle) * startRadius
+        particle.position.z = 0
+        particle.scale.setScalar(data.size)
+        particle.material.color.setRGB(color.r / 255, color.g / 255, color.b / 255)
+        particle.material.opacity = 0.96
+        return true
+      }
+
+      function updateDragParticles(now, holdLevel, speed, dt) {
+        const hold = Math.max(0, Math.min(1, holdLevel / 11))
+        const intensity = hold
+        const palette = activeDragColors()
+        if (hold > 0.02) {
+          const emitRate = 7.5 - hold * 5.2
+          dragEmitAccumulator += dt * emitRate
+          while (dragEmitAccumulator >= 1) {
+            if (!emitDragParticle(palette)) break
+            dragEmitAccumulator -= 1
+          }
+        } else {
+          dragEmitAccumulator = 0
+        }
+
+        let activeCount = 0
+        for (const particle of dragParticles) {
+          const data = particle.userData
+          if (!data.active) {
+            particle.material.opacity = 0
+            continue
+          }
+          data.life += dt
+          if (data.life >= data.maxLife) {
+            data.active = false
+            particle.material.opacity = 0
+            continue
+          }
+          activeCount += 1
+          const age = data.life / data.maxLife
+          particle.position.x += data.vx * dt
+          particle.position.y += data.vy * dt
+          const fade = Math.sin(age * Math.PI)
+          const scale = data.size * (0.92 + age * 0.58)
+          particle.scale.setScalar(scale)
+          particle.material.opacity = Math.min(1, 0.12 + fade * 0.98)
+        }
+        dragParticleGroup.visible = activeCount > 0 || intensity > 0.01
+        return { intensity, activeCount, emitRate: hold > 0.02 ? 7.5 - hold * 5.2 : 0 }
       }
 
       function resize() {
@@ -896,6 +1031,7 @@ function petHtml3D() {
       createFace("left", [-0.30, 0, 0], [0, -Math.PI / 2, rad(faceRotations.left || 0)], [-0.314, 0, 0])
       createFace("top", [0, 0.30, 0], [-Math.PI / 2, 0, rad(faceRotations.top || 0)], [0, 0.314, 0])
       createFace("bottom", [0, -0.30, 0], [Math.PI / 2, 0, rad(faceRotations.bottom || 0)], [0, -0.314, 0])
+      createDragParticles()
 
       function createFace(name, position, rotation, glowPosition) {
         const face = new THREE.Mesh(faceGeometry, iconMaterial.clone())
@@ -1156,6 +1292,7 @@ function petHtml3D() {
         const glowR = Math.round(92 + (0 - 92) * glow)
         const glowG = Math.round(255 + (190 - 255) * glow)
         const glowB = Math.round(232 + (210 - 232) * glow)
+        const dragParticles = updateDragParticles(now, frictionHoldLevel, speed, dt)
         const busyFaces = syncBusyFaces(sessions, speed)
         processSignals(snapshot.signals || [], now)
         const helloFlashes = applyFlashFaces(now)
@@ -1176,6 +1313,7 @@ function petHtml3D() {
           speedRatio,
           nextTorqueAt,
           glow,
+          dragParticles,
           colorReleaseSpeed,
           glowColor: { r: glowR, g: glowG, b: glowB },
           faceRotations,
