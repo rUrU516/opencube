@@ -203,6 +203,7 @@ function applySessionEvent(event) {
   }
 
   if (event.type === "session.idle") {
+    activeToolsBySession.delete(event.sessionID)
     sessionMap.set(event.sessionID, {
       sessionID: event.sessionID,
       state: "idle",
@@ -1447,6 +1448,11 @@ function petHtml3D() {
           now: Date.now(),
           busy: busyCount,
           mode: isBusy ? "busy" : "idle",
+          sessions: sessions.map((session) => ({
+            sessionID: session.sessionID,
+            state: session.state,
+            activeTools: session.activeTools || [],
+          })),
           rotation: { ...rotation },
           angularVelocity: { ...angularVelocity },
           torque: { ...torque },
