@@ -47,6 +47,17 @@ function cubNotice(text, icon = CUB_ICON) {
   return `${icon} ${text}`
 }
 
+function summarizeToolOutput(output) {
+  if (!output || typeof output !== "object") return undefined
+  const text = typeof output.output === "string" ? output.output : undefined
+  return {
+    title: output.title,
+    output: text && text.length > 2000 ? `${text.slice(0, 2000)}…` : text,
+    outputLength: text?.length,
+    metadata: output.metadata,
+  }
+}
+
 module.exports = {
   id: "opencube",
   server: async ({ client }) => {
@@ -161,6 +172,31 @@ module.exports = {
           sessionID,
           status,
           previousStatus: previous,
+          source: "opencube-plugin",
+        })
+      },
+
+      "tool.execute.before": async (input, output) => {
+        await sendEvent({
+          type: "tool.start",
+          message: `tool ${input.tool} started`,
+          sessionID: input.sessionID,
+          tool: input.tool,
+          callID: input.callID,
+          args: output?.args,
+          source: "opencube-plugin",
+        })
+      },
+
+      "tool.execute.after": async (input, output) => {
+        await sendEvent({
+          type: "tool.finish",
+          message: `tool ${input.tool} finished`,
+          sessionID: input.sessionID,
+          tool: input.tool,
+          callID: input.callID,
+          args: input.args,
+          result: summarizeToolOutput(output),
           source: "opencube-plugin",
         })
       },
