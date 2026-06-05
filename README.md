@@ -43,21 +43,27 @@ You can also add it manually to `~/.config/opencode/opencode.json`:
 
 ## Update
 
-If you already installed OpenCube and want to upgrade to the latest published version, reinstall it with `--force`:
+If you already installed OpenCube and want to upgrade, reinstall the target version with `--force`:
+
+```sh
+opencode plugin opencube@0.3.1 --global --force
+```
+
+Using an explicit version is recommended for upgrades because it avoids stale `latest` cache behavior. You can still install the npm latest tag if desired:
 
 ```sh
 opencode plugin opencube@latest --global --force
 ```
 
-You can also pin a specific version:
-
-```sh
-opencode plugin opencube@0.3.0 --global --force
-```
-
 Then fully restart opencode and run `/pet` again. OpenCube and opencode plugins are loaded at startup, so the running desktop pet is not hot-replaced in place.
 
-Future versions may add a self-check command that detects newer npm releases and guides the user through this upgrade flow.
+You can ask OpenCube to check npm for the latest published version:
+
+```text
+/pet_update
+```
+
+`/pet_update` does not hot-replace the running plugin. It reports whether a newer version exists and prints an explicit `opencode plugin opencube@<version> --global --force` command to run.
 
 ## Commands
 
@@ -67,6 +73,8 @@ Future versions may add a self-check command that detects newer npm releases and
 | `/pet_stop` | Quit OpenCube. |
 | `/pet_say_hello` | Flash one currently free face three times with a random color. |
 | `/pet_fancy_say_hello` | Run a denser randomized light show across currently free faces. |
+| `/pet_update` | Check npm for a newer OpenCube release and show the upgrade command. |
+| `/pet_upgrade` | Alias for `/pet_update`. |
 
 These commands are handled by the plugin and do not get sent to the model.
 
