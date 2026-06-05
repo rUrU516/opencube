@@ -21,7 +21,7 @@ OpenCube is packaged as an opencode plugin plus an Electron desktop process.
 
 ## Install
 
-Install globally through opencode:
+Install the latest published version globally through opencode:
 
 ```sh
 opencode plugin opencube --global
@@ -40,6 +40,24 @@ You can also add it manually to `~/.config/opencode/opencode.json`:
   "plugin": ["opencube"]
 }
 ```
+
+## Update
+
+If you already installed OpenCube and want to upgrade to the latest published version, reinstall it with `--force`:
+
+```sh
+opencode plugin opencube@latest --global --force
+```
+
+You can also pin a specific version:
+
+```sh
+opencode plugin opencube@0.3.0 --global --force
+```
+
+Then fully restart opencode and run `/pet` again. OpenCube and opencode plugins are loaded at startup, so the running desktop pet is not hot-replaced in place.
+
+Future versions may add a self-check command that detects newer npm releases and guides the user through this upgrade flow.
 
 ## Commands
 
