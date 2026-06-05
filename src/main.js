@@ -1279,7 +1279,7 @@ function petHtml3D() {
           permissionGlowGeometry,
           new THREE.MeshBasicMaterial({
             map: glowTexture,
-            color: 0xff2448,
+            color: 0xffffff,
             transparent: true,
             opacity: 0,
             blending: THREE.AdditiveBlending,
@@ -1497,10 +1497,11 @@ function petHtml3D() {
             continue
           }
 
-          permissionGlow.material.color.setRGB(1, 0.08, 0.16)
+          const color = sessionColorMap.get(sessionID) || randomSessionGlowColor()
+          permissionGlow.material.color.setRGB(color.r / 255, color.g / 255, color.b / 255)
           permissionGlow.material.opacity = 0.16 + pulse * 0.62
           permissionGlow.scale.setScalar(1.00 + pulse * 0.34)
-          active[faceName] = { sessionID, pulse, pending: true }
+          active[faceName] = { sessionID, pulse, pending: true, color: color.name, rgb: [color.r, color.g, color.b] }
         }
 
         return active
