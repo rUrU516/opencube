@@ -27,6 +27,7 @@ let petSignals = []
 let sessionMap = new Map()
 let activeToolsBySession = new Map()
 let pendingPermissionsByRequest = new Map()
+let pendingQuestionsByRequest = new Map()
 let cleanupTimer = null
 let dragState = null
 
@@ -133,6 +134,7 @@ function recordEvent(event) {
   applySessionEvent(item)
   applyToolEvent(item)
   applyPermissionEvent(item)
+  applyQuestionEvent(item)
   if (item.type === "hello" || item.type === "fancy_hello") {
     petSignals.push({
       id: item.id,
@@ -177,6 +179,33 @@ function applyPermissionEvent(event) {
 function clearPendingPermissionsForSession(sessionID) {
   for (const [requestID, permission] of pendingPermissionsByRequest) {
     if (permission?.sessionID === sessionID) pendingPermissionsByRequest.delete(requestID)
+  }
+}
+
+function applyQuestionEvent(event) {
+  if (!event || typeof event.sessionID !== "string") return
+
+  if (event.type === "question.ask") {
+    const requestID = typeof event.requestID === "string" ? event.requestID : event.id
+    if (!requestID) return
+    pendingQuestionsByRequest.set(requestID, {
+      requestID,
+      sessionID: event.sessionID,
+      questions: event.questions,
+      tool: event.tool,
+      askedAt: event.receivedAt || Date.now(),
+    })
+    return
+  }
+
+  if (event.type === "question.reply" || event.type === "question.reject") {
+    if (typeof event.requestID === "string") pendingQuestionsByRequest.delete(event.requestID)
+  }
+}
+
+function clearPendingQuestionsForSession(sessionID) {
+  for (const [requestID, question] of pendingQuestionsByRequest) {
+    if (question?.sessionID === sessionID) pendingQuestionsByRequest.delete(requestID)
   }
 }
 
@@ -237,6 +266,7 @@ function applySessionEvent(event) {
   if (event.type === "session.idle") {
     activeToolsBySession.delete(event.sessionID)
     clearPendingPermissionsForSession(event.sessionID)
+    clearPendingQuestionsForSession(event.sessionID)
     sessionMap.set(event.sessionID, {
       sessionID: event.sessionID,
       state: "idle",
@@ -259,6 +289,7 @@ function pruneIdleSessions(refresh = true) {
       sessionMap.delete(sessionID)
       activeToolsBySession.delete(sessionID)
       clearPendingPermissionsForSession(sessionID)
+      clearPendingQuestionsForSession(sessionID)
       changed = true
     }
   }
@@ -294,6 +325,7 @@ function getPetState() {
       color: DEFAULT_SESSION_COLORS[index % DEFAULT_SESSION_COLORS.length],
     })),
     permissions: Array.from(pendingPermissionsByRequest.values()),
+    questions: Array.from(pendingQuestionsByRequest.values()),
     signals: petSignals,
   }
 }
@@ -759,7 +791,7 @@ function petHtml3D() {
       const dragParticleTexture = createDragParticleTexture()
       const faceGeometry = new THREE.PlaneGeometry(0.60, 0.60)
       const glowGeometry = new THREE.PlaneGeometry(1.18, 1.18)
-      const permissionGlowGeometry = new THREE.PlaneGeometry(1.42, 1.42)
+      const permissionGlowGeometry = new THREE.PlaneGeometry(1.62, 1.62)
       const rad = THREE.MathUtils.degToRad
 
       function createGlowTexture() {
@@ -1287,7 +1319,7 @@ function petHtml3D() {
             side: THREE.DoubleSide,
           }),
         )
-        permissionGlow.position.set(...glowPosition.map((value) => value === 0 ? 0 : value * 1.055))
+        permissionGlow.position.set(...glowPosition.map((value) => value === 0 ? 0 : value * 1.072))
         permissionGlow.rotation.set(...rotation)
         cubeGroup.add(permissionGlow)
         permissionGlowMeshes.set(name, permissionGlow)
@@ -1494,13 +1526,14 @@ function petHtml3D() {
           const sessionID = Array.from(pendingSessionIDs).find((id) => sessionFaceMap.get(id) === faceName)
           if (!sessionID) {
             permissionGlow.material.opacity = 0
+            permissionGlow.scale.setScalar(1)
             continue
           }
 
           const color = sessionColorMap.get(sessionID) || randomSessionGlowColor()
           permissionGlow.material.color.setRGB(color.r / 255, color.g / 255, color.b / 255)
-          permissionGlow.material.opacity = 0.16 + pulse * 0.62
-          permissionGlow.scale.setScalar(1.00 + pulse * 0.34)
+          permissionGlow.material.opacity = 0.14 + pulse * 0.60
+          permissionGlow.scale.setScalar(1.06 + pulse * 0.42)
           active[faceName] = { sessionID, pulse, pending: true, color: color.name, rgb: [color.r, color.g, color.b] }
         }
 
@@ -1566,7 +1599,8 @@ function petHtml3D() {
         const toolParticles = updateToolParticles(sessions, dt, now)
         processSignals(snapshot.signals || [], now)
         const helloFlashes = applyFlashFaces(now)
-        const permissionGlows = applyPermissionGlowFaces(snapshot.permissions || [], now)
+        const pendingAttention = [...(snapshot.permissions || []), ...(snapshot.questions || [])]
+        const permissionGlows = applyPermissionGlowFaces(pendingAttention, now)
         renderCube()
         latestDebug = {
           now: Date.now(),

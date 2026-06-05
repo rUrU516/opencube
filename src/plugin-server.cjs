@@ -169,6 +169,45 @@ module.exports = {
           return
         }
 
+        if (event.type === "question.asked") {
+          const question = event.properties || {}
+          await sendEvent({
+            type: "question.ask",
+            message: "opencode is waiting for a question answer",
+            sessionID: question.sessionID,
+            requestID: question.id,
+            questions: question.questions,
+            tool: question.tool,
+            source: "opencube-plugin",
+          })
+          return
+        }
+
+        if (event.type === "question.replied") {
+          const question = event.properties || {}
+          await sendEvent({
+            type: "question.reply",
+            message: "opencode question was answered",
+            sessionID: question.sessionID,
+            requestID: question.requestID,
+            answers: question.answers,
+            source: "opencube-plugin",
+          })
+          return
+        }
+
+        if (event.type === "question.rejected") {
+          const question = event.properties || {}
+          await sendEvent({
+            type: "question.reject",
+            message: "opencode question was rejected",
+            sessionID: question.sessionID,
+            requestID: question.requestID,
+            source: "opencube-plugin",
+          })
+          return
+        }
+
         if (event.type !== "session.status") return
 
         const sessionID = event.properties?.sessionID
