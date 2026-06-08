@@ -16,6 +16,9 @@ const ICON_PATH = process.env.OPENCODE_PET_ICON || path.join(__dirname, "..", "a
 const MAX_EVENTS = 100
 const MAX_INTERACTION_EVENTS = 80
 const IDLE_TTL_MS = 5 * 60 * 1000
+const PET_WINDOW_SIZE = 120
+const MIN_PET_SIZE_SCALE = 0.3
+const MAX_PET_SIZE_SCALE = 3
 
 let petWindow = null
 let panelWindow = null
@@ -30,6 +33,7 @@ let pendingPermissionsByRequest = new Map()
 let pendingQuestionsByRequest = new Map()
 let cleanupTimer = null
 let dragState = null
+let petSizeScale = 1
 
 function normalizeDragPoint(point) {
   const screenX = Number(point?.screenX)
@@ -103,12 +107,22 @@ function ensureDataDir() {
   fs.mkdirSync(DATA_DIR, { recursive: true })
 }
 
+function readState() {
+  try {
+    return JSON.parse(fs.readFileSync(STATE_FILE, "utf8"))
+  } catch {
+    return {}
+  }
+}
+
 function writeState(extra = {}) {
   ensureDataDir()
+  const previous = readState()
   fs.writeFileSync(
     STATE_FILE,
     JSON.stringify(
       {
+        ...previous,
         pid: process.pid,
         startedAt: Date.now(),
         iconPath: ICON_PATH,
@@ -118,6 +132,34 @@ function writeState(extra = {}) {
       2,
     ),
   )
+}
+
+function normalizePetSizeScale(value) {
+  const scale = Number(value)
+  if (!Number.isFinite(scale)) return undefined
+  return Math.max(MIN_PET_SIZE_SCALE, Math.min(MAX_PET_SIZE_SCALE, scale))
+}
+
+function getPetWindowSize() {
+  return Math.round(PET_WINDOW_SIZE * petSizeScale)
+}
+
+function loadPetSizeScale() {
+  petSizeScale = normalizePetSizeScale(readState().sizeScale) ?? 1
+  return petSizeScale
+}
+
+function applyPetSizeScale(scale) {
+  const nextScale = normalizePetSizeScale(scale)
+  if (nextScale === undefined) throw new Error(`sizeScale must be a number between ${MIN_PET_SIZE_SCALE} and ${MAX_PET_SIZE_SCALE}`)
+  petSizeScale = nextScale
+  const size = getPetWindowSize()
+  writeState({ sizeScale: petSizeScale, size: { width: size, height: size } })
+  if (petWindow && !petWindow.isDestroyed()) {
+    petWindow.setSize(size, size, false)
+    petWindow.loadFile(writePetHtmlFile())
+  }
+  return { scale: petSizeScale, width: size, height: size }
 }
 
 function shouldQuit(argv = process.argv) {
@@ -731,6 +773,7 @@ function petHtml3D() {
   const initialStateJson = JSON.stringify(getPetState()).replaceAll("<", "\\u003c")
   const iconUrl = createIconDataUrl()
   const threeCjsPath = JSON.stringify(path.join(path.dirname(require.resolve("three")), "three.cjs"))
+  const renderSize = getPetWindowSize()
   return `<!doctype html>
 <html>
   <head>
@@ -755,8 +798,8 @@ function petHtml3D() {
       #scene {
         position: absolute;
         inset: 0;
-        width: 100%;
-        height: 100%;
+        width: ${renderSize}px;
+        height: ${renderSize}px;
         pointer-events: none;
       }
       #hit-layer {
@@ -785,6 +828,7 @@ function petHtml3D() {
       const THREE = require(${threeCjsPath})
       const { ipcRenderer } = require("electron")
 
+      const PET_RENDER_SIZE = ${renderSize}
       window.__PET_STATE = ${initialStateJson}
       const stage = document.querySelector(".stage")
       const hitLayer = document.getElementById("hit-layer")
@@ -816,7 +860,7 @@ function petHtml3D() {
       camera.position.set(0, 0.04, 3.25)
       const renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true })
       renderer.setClearColor(0x000000, 0)
-      renderer.setPixelRatio(Math.min((window.devicePixelRatio || 1) * 1.5, 3))
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2))
       renderer.outputColorSpace = THREE.SRGBColorSpace
 
       const cubeGroup = new THREE.Group()
@@ -1144,10 +1188,8 @@ function petHtml3D() {
       }
 
       function resize() {
-        const width = Math.max(1, window.innerWidth)
-        const height = Math.max(1, window.innerHeight)
-        renderer.setSize(width, height, false)
-        camera.aspect = width / height
+        renderer.setSize(PET_RENDER_SIZE, PET_RENDER_SIZE, false)
+        camera.aspect = 1
         camera.updateProjectionMatrix()
       }
       window.addEventListener("resize", resize)
@@ -1682,6 +1724,16 @@ function petHtml3D() {
           busyFaces,
           helloFlashes,
           permissionGlows,
+          renderSize: {
+            fixed: PET_RENDER_SIZE,
+            innerWidth: window.innerWidth,
+            innerHeight: window.innerHeight,
+            devicePixelRatio: window.devicePixelRatio || 1,
+            canvasWidth: canvas.width,
+            canvasHeight: canvas.height,
+            canvasClientWidth: canvas.clientWidth,
+            canvasClientHeight: canvas.clientHeight,
+          },
         }
         requestAnimationFrame(tick)
       }
@@ -1726,9 +1778,10 @@ function restorePosition(win) {
 
 function createPetWindow() {
   if (petWindow && !petWindow.isDestroyed()) return petWindow
+  const size = getPetWindowSize()
   petWindow = new BrowserWindow({
-    width: 120,
-    height: 120,
+    width: size,
+    height: size,
     show: false,
     frame: false,
     resizable: false,
@@ -1884,6 +1937,7 @@ function startServer() {
           port: PORT,
           events: events.length,
           pet: "opencube",
+          size: { scale: petSizeScale, width: getPetWindowSize(), height: getPetWindowSize() },
           sessions: getPetState().sessions.map(({ sessionID, state, busyIndex, idleIndex, color }) => ({
             sessionID,
             state,
@@ -1933,6 +1987,12 @@ function startServer() {
         return json(res, 200, { ok: true })
       }
 
+      if (req.method === "POST" && url.pathname === "/size") {
+        const body = await readRequestJson(req)
+        const size = applyPetSizeScale(body?.scale)
+        return json(res, 200, { ok: true, size })
+      }
+
       if (req.method === "POST" && url.pathname === "/toggle-panel") {
         togglePanel()
         return json(res, 200, { ok: true, visible: panelWindow?.isVisible() === true })
@@ -1957,6 +2017,7 @@ function startServer() {
 
 function start() {
   app.dock?.hide()
+  loadPetSizeScale()
   writeState({ visible: false, mode: "floating" })
   createTray()
   startServer()

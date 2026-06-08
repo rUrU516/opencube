@@ -1,9 +1,11 @@
-const { quitPet, sendEvent, showPet } = require("./plugin-shared.cjs")
+const { quitPet, requestPet, sendEvent, showPet } = require("./plugin-shared.cjs")
 const pkg = require("../package.json")
 
 const COMMAND_HANDLED_SENTINEL = "__OPENCODE_PET_COMMAND_HANDLED__"
 const CUB_ICON = "◈"
 const UPDATE_CHECK_TIMEOUT_MS = 5000
+const MIN_PET_SIZE_SCALE = 0.3
+const MAX_PET_SIZE_SCALE = 3
 
 function handled() {
   throw new Error(COMMAND_HANDLED_SENTINEL)
@@ -31,6 +33,31 @@ function isFancySayHello(input) {
 
 function isUpdateCheck(input) {
   return input.command === "pet_update" || input.command === "pet_upgrade"
+}
+
+function isPetSize(input) {
+  return input.command === "pet-size" || input.command === "pet_size"
+}
+
+function petSizeUsage() {
+  return cubNotice(
+    [
+      "Set OpenCube size with: /pet-size 0.7",
+      `Allowed scale: ${MIN_PET_SIZE_SCALE} to ${MAX_PET_SIZE_SCALE}.`,
+      "Run /pet first if OpenCube is sleeping.",
+    ].join("\n"),
+    "↔",
+  )
+}
+
+function parsePetSizeScale(args) {
+  const text = textOfArguments(args)
+  if (!text) return undefined
+  const first = text.split(/\s+/)[0]
+  const scale = Number(first)
+  if (!Number.isFinite(scale)) return undefined
+  if (scale < MIN_PET_SIZE_SCALE || scale > MAX_PET_SIZE_SCALE) return undefined
+  return scale
 }
 
 function compareVersions(a, b) {
@@ -161,10 +188,18 @@ module.exports = {
           template: "/pet_upgrade",
           description: "Alias for /pet_update.",
         }
+        cfg.command["pet-size"] = {
+          template: "/pet-size",
+          description: "Show or set OpenCube size, for example /pet-size 0.7.",
+        }
+        cfg.command.pet_size = {
+          template: "/pet_size",
+          description: "Alias for /pet-size.",
+        }
       },
 
       "command.execute.before": async (input, output) => {
-        if (!["pet", "pet_stop", "pet_say_hello", "pet_fancy_say_hello", "pet_update", "pet_upgrade"].includes(input.command)) return
+        if (!["pet", "pet_stop", "pet_say_hello", "pet_fancy_say_hello", "pet_update", "pet_upgrade", "pet-size", "pet_size"].includes(input.command)) return
 
         // There is no official cancel primitive in command.execute.before yet.
         // Throwing this sentinel aborts the command flow before opencode sends
@@ -238,6 +273,22 @@ module.exports = {
           }
 
           await injectNotice(client, input.sessionID, formatUpdateNotice(latest))
+        } else if (isPetSize(input)) {
+          const scale = parsePetSizeScale(input.arguments)
+          if (scale === undefined) {
+            await injectNotice(client, input.sessionID, petSizeUsage())
+          } else {
+            const result = await requestPet("/size", { method: "POST", body: { scale }, timeoutMs: 1000 })
+            if (result?.ok && result.size) {
+              await injectNotice(
+                client,
+                input.sessionID,
+                cubNotice(`OpenCube size set to ${result.size.scale} (${result.size.width}×${result.size.height}).`, "↔"),
+              )
+            } else {
+              await injectNotice(client, input.sessionID, cubNotice("OpenCube is sleeping... zzz  Run /pet first, then try /pet-size 0.7.", "☾"))
+            }
+          }
         } else {
           await showPet({
             onProgress: (message) => injectNotice(client, input.sessionID, message),
