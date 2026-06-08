@@ -589,7 +589,7 @@ function petHtml() {
     </style>
   </head>
   <body>
-    <div class="stage" title="opencode pet：拖拽移动，右键打开菜单">
+    <div class="stage">
       <div class="pet-art" aria-label="pixel opencode pet">${petBodySvg}</div>
       <div id="ball-layer"></div>
     </div>
@@ -811,7 +811,7 @@ function petHtml3D() {
     </style>
   </head>
   <body>
-    <div class="stage" title="opencode pet：拖拽移动，右键打开菜单">
+    <div class="stage">
       <canvas id="scene" aria-label="3D opencode pet"></canvas>
       <div id="hit-layer" aria-label="OpenCube interaction layer"></div>
     </div>
