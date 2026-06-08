@@ -31,17 +31,68 @@ let pendingQuestionsByRequest = new Map()
 let cleanupTimer = null
 let dragState = null
 
+function normalizeDragPoint(point) {
+  const screenX = Number(point?.screenX)
+  const screenY = Number(point?.screenY)
+  if (!Number.isFinite(screenX) || !Number.isFinite(screenY)) return null
+  return { screenX, screenY }
+}
+
+function clamp(value, min, max) {
+  return Math.max(min, Math.min(max, value))
+}
+
+function getVirtualWorkArea() {
+  const displays = screen.getAllDisplays()
+  if (!displays.length) return screen.getPrimaryDisplay().workArea
+
+  return displays.reduce((area, display) => {
+    const next = display.workArea
+    const left = Math.min(area.x, next.x)
+    const top = Math.min(area.y, next.y)
+    const right = Math.max(area.x + area.width, next.x + next.width)
+    const bottom = Math.max(area.y + area.height, next.y + next.height)
+    return { x: left, y: top, width: right - left, height: bottom - top }
+  }, displays[0].workArea)
+}
+
+function normalizeWindowPosition(x, y, win) {
+  if (!Number.isFinite(x) || !Number.isFinite(y) || !win || win.isDestroyed()) return null
+
+  const bounds = win.getBounds()
+  const area = getVirtualWorkArea()
+  const minX = area.x
+  const minY = area.y
+  const maxX = area.x + area.width - Math.max(1, bounds.width)
+  const maxY = area.y + area.height - Math.max(1, bounds.height)
+
+  return {
+    x: Math.round(clamp(x, Math.min(minX, maxX), Math.max(minX, maxX))),
+    y: Math.round(clamp(y, Math.min(minY, maxY), Math.max(minY, maxY))),
+  }
+}
+
 ipcMain.on("opencube-drag-start", (event, point) => {
   if (!petWindow || petWindow.isDestroyed()) return
+  const dragPoint = normalizeDragPoint(point)
+  if (!dragPoint) return
   const [x, y] = petWindow.getPosition()
-  dragState = { windowX: x, windowY: y, screenX: point.screenX, screenY: point.screenY }
+  dragState = { windowX: x, windowY: y, screenX: dragPoint.screenX, screenY: dragPoint.screenY }
 })
 
 ipcMain.on("opencube-drag-move", (event, point) => {
   if (!petWindow || petWindow.isDestroyed() || !dragState) return
-  const nextX = Math.round(dragState.windowX + point.screenX - dragState.screenX)
-  const nextY = Math.round(dragState.windowY + point.screenY - dragState.screenY)
-  petWindow.setPosition(nextX, nextY, false)
+  const dragPoint = normalizeDragPoint(point)
+  if (!dragPoint) return
+  const nextX = Math.round(dragState.windowX + dragPoint.screenX - dragState.screenX)
+  const nextY = Math.round(dragState.windowY + dragPoint.screenY - dragState.screenY)
+  const nextPosition = normalizeWindowPosition(nextX, nextY, petWindow)
+  if (!nextPosition) return
+  try {
+    petWindow.setPosition(nextPosition.x, nextPosition.y, false)
+  } catch {
+    dragState = null
+  }
 })
 
 ipcMain.on("opencube-drag-end", () => {
@@ -1658,7 +1709,7 @@ function restorePosition(win) {
   try {
     const raw = fs.readFileSync(STATE_FILE, "utf8")
     const state = JSON.parse(raw)
-    if (typeof state.x === "number" && typeof state.y === "number") {
+    if (Number.isFinite(state.x) && Number.isFinite(state.y)) {
       win.setPosition(state.x, state.y, false)
       return
     }
