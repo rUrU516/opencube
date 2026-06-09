@@ -773,6 +773,7 @@ function petHtml3D() {
   const initialStateJson = JSON.stringify(getPetState()).replaceAll("<", "\\u003c")
   const iconUrl = createIconDataUrl()
   const threeCjsPath = JSON.stringify(path.join(path.dirname(require.resolve("three")), "three.cjs"))
+  const cubeRuntimePath = JSON.stringify(path.join(__dirname, "cube-render-runtime.cjs"))
   const renderSize = getPetWindowSize()
   return `<!doctype html>
 <html>
@@ -827,32 +828,27 @@ function petHtml3D() {
     <script>
       const THREE = require(${threeCjsPath})
       const { ipcRenderer } = require("electron")
+      const { createCubeRuntime, randomBetween } = require(${cubeRuntimePath})
 
       const PET_RENDER_SIZE = ${renderSize}
       window.__PET_STATE = ${initialStateJson}
       const stage = document.querySelector(".stage")
       const hitLayer = document.getElementById("hit-layer")
       const faceOrder = ["front", "right", "top", "back", "left", "bottom"]
-      const sessionFaceMap = new Map()
-      const sessionColorMap = new Map()
-      const handledSignalIDs = new Set()
-      const faceFlashes = new Map()
-      const colorReleaseSpeed = 90
       const faceMeshes = new Map()
       const glowMeshes = new Map()
       const permissionGlowMeshes = new Map()
       let snapshot = window.__PET_STATE || { sessions: [] }
       let lastFrame = performance.now()
-      let rotation = { x: -14, y: -28, z: 0 }
-      let angularVelocity = { x: 0, y: 0, z: 0 }
-      let torque = { x: 0, y: 0, z: 0 }
-      let nextTorqueAt = 0
-      let wasBusy = false
+      const cubeRuntime = createCubeRuntime()
+      const cubeVisual = cubeRuntime.visual
+      const rotation = cubeRuntime.state.rotation
+      const angularVelocity = cubeRuntime.state.angularVelocity
       let frictionHoldActive = false
       let frictionHoldLevel = 0
       let leftDragActive = false
       let dragEmitAccumulator = 0
-      let latestDebug = { now: Date.now(), busy: 0, rotation, angularVelocity, torque, speed: 0, faceRotations: {} }
+      let latestDebug = { now: Date.now(), busy: 0, rotation, angularVelocity, speed: 0, faceRotations: {} }
 
       const canvas = document.getElementById("scene")
       const scene = new THREE.Scene()
@@ -926,9 +922,6 @@ function petHtml3D() {
 
       const dragParticles = []
       const toolParticles = []
-      const toolEmitAccumulators = new Map()
-      const toolEmissionStates = new Map()
-      const toolEmissionHoldMs = 2000
       const faceVectors = {
         front: { position: new THREE.Vector3(0, 0, 0.34), normal: new THREE.Vector3(0, 0, 1) },
         back: { position: new THREE.Vector3(0, 0, -0.34), normal: new THREE.Vector3(0, 0, -1) },
@@ -1021,61 +1014,13 @@ function petHtml3D() {
         return true
       }
 
-      function updateToolParticles(sessions, dt, now) {
-        const activeIDs = new Set()
-        const emitters = []
-        const busyIDs = new Set(
-          sessions
-            .filter((session) => session?.state === "busy" && typeof session.sessionID === "string")
-            .map((session) => session.sessionID),
-        )
-
-        for (const session of sessions) {
-          if (session?.state !== "busy" || typeof session.sessionID !== "string" || !session.activeTools?.length) continue
-          const currentState = toolEmissionStates.get(session.sessionID)
-          const faceName = sessionFaceMap.get(session.sessionID) || currentState?.faceName
-          if (!faceName) continue
-          const color = sessionColorMap.get(session.sessionID) || currentState?.color || randomSessionGlowColor()
-
-          activeIDs.add(session.sessionID)
-          toolEmissionStates.set(session.sessionID, {
-            faceName,
-            color,
-            holdUntil: now + toolEmissionHoldMs,
-          })
-          emitters.push({ sessionID: session.sessionID, faceName, color, held: false, holdRemainingMs: toolEmissionHoldMs })
-        }
-
-        for (const [sessionID, state] of Array.from(toolEmissionStates.entries())) {
-          if (activeIDs.has(sessionID)) continue
-          if (!busyIDs.has(sessionID) || !state?.faceName || state.holdUntil <= now) {
-            toolEmissionStates.delete(sessionID)
-            toolEmitAccumulators.delete(sessionID)
-            continue
+      function updateToolParticles(emissionPlan, dt) {
+        const activeIDs = emissionPlan?.activeIDs || new Set()
+        const emitters = emissionPlan?.emitters || []
+        for (const emission of emissionPlan?.emissions || []) {
+          for (let index = 0; index < emission.count; index += 1) {
+            if (!emitToolParticle(emission.faceName, emission.color)) break
           }
-          emitters.push({
-            sessionID,
-            faceName: state.faceName,
-            color: state.color || randomSessionGlowColor(),
-            held: true,
-            holdRemainingMs: state.holdUntil - now,
-          })
-        }
-
-        const emittingIDs = new Set(emitters.map((emitter) => emitter.sessionID))
-        for (const sessionID of Array.from(toolEmitAccumulators.keys())) {
-          if (!emittingIDs.has(sessionID)) toolEmitAccumulators.delete(sessionID)
-        }
-
-        for (const emitter of emitters) {
-          const jitterRate = randomBetween(7.5, 11.5)
-          const next = (toolEmitAccumulators.get(emitter.sessionID) || 0) + dt * jitterRate
-          let accumulator = next
-          while (accumulator >= 1) {
-            if (!emitToolParticle(emitter.faceName, emitter.color)) break
-            accumulator -= 1
-          }
-          toolEmitAccumulators.set(emitter.sessionID, accumulator)
         }
 
         let activeCount = 0
@@ -1097,17 +1042,9 @@ function petHtml3D() {
           particle.scale.setScalar(data.size * (1.02 + age * 0.42))
           particle.material.opacity = Math.min(1, 0.24 + Math.sin(age * Math.PI) * 1.18)
         }
-        const heldSessions = emitters.filter((emitter) => emitter.held).length
+        const heldSessions = emissionPlan?.heldSessions || emitters.filter((emitter) => emitter.held).length
         toolParticleGroup.visible = activeCount > 0 || emitters.length > 0
         return { activeSessions: activeIDs.size, emittingSessions: emitters.length, heldSessions, activeCount }
-      }
-
-      function activeDragColors() {
-        const colors = []
-        for (const color of sessionColorMap.values()) {
-          if (color && Number.isFinite(color.r) && Number.isFinite(color.g) && Number.isFinite(color.b)) colors.push(color)
-        }
-        return colors
       }
 
       function monochromeDragColor(index, cycle) {
@@ -1149,7 +1086,7 @@ function petHtml3D() {
       function updateDragParticles(now, holdLevel, speed, dt) {
         const hold = Math.max(0, Math.min(1, holdLevel / 11))
         const intensity = hold
-        const palette = activeDragColors()
+        const palette = cubeVisual.activeDragColors()
         if (hold > 0.02) {
           const emitRate = 7.5 - hold * 5.2
           dragEmitAccumulator += dt * emitRate
@@ -1263,17 +1200,6 @@ function petHtml3D() {
         ipcRenderer.send("opencube-drag-end")
       }
 
-      function updateFrictionHold(dt) {
-        const growPerSecond = 2.4
-        const recoverPerSecond = 8.0
-        if (frictionHoldActive) {
-          frictionHoldLevel = Math.min(11, frictionHoldLevel + growPerSecond * dt)
-        } else {
-          frictionHoldLevel = Math.max(0, frictionHoldLevel - recoverPerSecond * dt)
-        }
-        return 1 + frictionHoldLevel
-      }
-
       hitLayer.addEventListener("pointerdown", (event) => {
         if (event.button === 0) beginLeftDrag(event)
         if (event.button === 2) beginFrictionHold(event)
@@ -1302,60 +1228,9 @@ function petHtml3D() {
         endFrictionHold()
       })
 
-      function randomBetween(min, max) {
-        return min + Math.random() * (max - min)
-      }
-
-      function randomSign() {
-        return Math.random() > 0.5 ? 1 : -1
-      }
-
-      function randomTorque() {
-        return {
-          x: randomBetween(45, 130) * randomSign(),
-          y: randomBetween(90, 260) * randomSign(),
-          z: randomBetween(18, 80) * randomSign(),
-        }
-      }
-
-      function randomChoice(items) {
-        return items[Math.floor(Math.random() * items.length)]
-      }
-
-      function hslToRgb(h, s, l) {
-        const c = (1 - Math.abs(2 * l - 1)) * s
-        const hp = h / 60
-        const x = c * (1 - Math.abs((hp % 2) - 1))
-        let r = 0
-        let g = 0
-        let b = 0
-        if (hp < 1) [r, g, b] = [c, x, 0]
-        else if (hp < 2) [r, g, b] = [x, c, 0]
-        else if (hp < 3) [r, g, b] = [0, c, x]
-        else if (hp < 4) [r, g, b] = [0, x, c]
-        else if (hp < 5) [r, g, b] = [x, 0, c]
-        else [r, g, b] = [c, 0, x]
-        const m = l - c / 2
-        return {
-          r: Math.round((r + m) * 255),
-          g: Math.round((g + m) * 255),
-          b: Math.round((b + m) * 255),
-        }
-      }
-
-      function randomSessionGlowColor() {
-        const hue = randomBetween(0, 360)
-        const saturation = randomBetween(0.68, 0.94)
-        const lightness = randomBetween(0.50, 0.66)
-        const rgb = hslToRgb(hue, saturation, lightness)
-        return {
-          ...rgb,
-          name: "random-" + Math.round(hue),
-        }
-      }
-
       function makeFaceRotations() {
         const quarterTurns = [0, 90, 180, 270]
+        const randomChoice = (items) => items[Math.floor(Math.random() * items.length)]
         return {
           front: Math.random() < 0.7 ? 0 : randomChoice(quarterTurns),
           back: randomChoice(quarterTurns),
@@ -1418,219 +1293,69 @@ function petHtml3D() {
         permissionGlowMeshes.set(name, permissionGlow)
       }
 
-      function magnitude(vector) {
-        return Math.sqrt(vector.x * vector.x + vector.y * vector.y + vector.z * vector.z)
-      }
-
-      function clampMagnitude(vector, max) {
-        const length = magnitude(vector)
-        if (length <= max || length === 0) return vector
-        const scale = max / length
-        vector.x *= scale
-        vector.y *= scale
-        vector.z *= scale
-        return vector
-      }
-
-      function setNextTorque(now) {
-        torque = randomTorque()
-        nextTorqueAt = now + randomBetween(4800, 5200)
-      }
-
       function setSnapshot(next) {
         snapshot = next || { sessions: [] }
       }
 
       function syncBusyFaces(sessions, speed) {
-        const busySessions = sessions
-          .filter((session) => session.state === "busy" && typeof session.sessionID === "string")
-          .sort((a, b) => (b.busyAt || b.lastAt || 0) - (a.busyAt || a.lastAt || 0))
-        const busyIDs = busySessions.map((session) => session.sessionID)
-        const busySet = new Set(busyIDs)
-
-        if (busyIDs.length === 0) {
-          if (speed < colorReleaseSpeed) {
-            sessionFaceMap.clear()
-            sessionColorMap.clear()
-          }
-        } else {
-          for (const sessionID of Array.from(sessionColorMap.keys())) {
-            if (!busySet.has(sessionID)) sessionColorMap.delete(sessionID)
-          }
-        }
-
-        for (const sessionID of busyIDs) {
-          if (!sessionColorMap.has(sessionID)) {
-            sessionColorMap.set(sessionID, randomSessionGlowColor())
-          }
-        }
-
-        if (busyIDs.length > 0) {
-          sessionFaceMap.clear()
-          for (const [index, session] of busySessions.slice(0, faceOrder.length).entries()) {
-            sessionFaceMap.set(session.sessionID, faceOrder[index])
-          }
-        }
-
-        const faceColors = new Map()
-        for (const [sessionID, faceName] of sessionFaceMap) {
-          faceColors.set(faceName, sessionColorMap.get(sessionID) || randomSessionGlowColor())
-        }
+        const view = cubeVisual.syncBusyFaces(sessions, speed)
         for (const faceName of faceOrder) {
-          const color = faceColors.get(faceName)
+          const style = view.faceStyles[faceName]
+          const color = style?.busy ? style.color : undefined
           const face = faceMeshes.get(faceName)
           const glow = glowMeshes.get(faceName)
           if (color) {
             const threeColor = new THREE.Color(color.r / 255, color.g / 255, color.b / 255)
-            face.material.color.copy(threeColor).lerp(new THREE.Color(0xffffff), 0.58)
+            face.material.color.copy(threeColor).lerp(new THREE.Color(0xffffff), style.faceLerp ?? 0.58)
             glow.material.color.setRGB(color.r / 255, color.g / 255, color.b / 255)
-            glow.material.opacity = 0.98
-            glow.scale.setScalar(1.24)
+            glow.material.opacity = style.glowOpacity ?? 0.98
+            glow.scale.setScalar(style.glowScale ?? 1.24)
           } else {
             face.material.color.setRGB(1, 1, 1)
             glow.material.opacity = 0
           }
         }
-        return Object.fromEntries(Array.from(sessionFaceMap.entries()).map(([sessionID, faceName]) => {
-          const color = sessionColorMap.get(sessionID) || randomSessionGlowColor()
-          return [sessionID, { face: faceName, color: color.name, rgb: [color.r, color.g, color.b] }]
-        }))
-      }
-
-      function chooseUnlitFace() {
-        const litFaces = new Set(sessionFaceMap.values())
-        const candidates = faceOrder.filter((faceName) => !litFaces.has(faceName) && !faceFlashes.has(faceName))
-        if (candidates.length === 0) return undefined
-        return randomChoice(candidates)
+        return view.busyFaces
       }
 
       function processSignals(signals, now) {
-        for (const signal of signals || []) {
-          if (!signal?.id || handledSignalIDs.has(signal.id)) continue
-          handledSignalIDs.add(signal.id)
-          if (signal.type !== "hello") continue
-
-          if (signal.mode === "fancy") {
-            const litFaces = new Set(sessionFaceMap.values())
-            const candidates = faceOrder.filter((faceName) => !litFaces.has(faceName) && !faceFlashes.has(faceName))
-            for (const faceName of candidates) {
-              const burstCount = Math.floor(randomBetween(8, 15))
-              let cursor = randomBetween(0, 140)
-              const bursts = []
-              for (let index = 0; index < burstCount; index++) {
-                const duration = randomBetween(150, 300)
-                bursts.push({
-                  at: cursor,
-                  duration,
-                  color: randomSessionGlowColor(),
-                  peak: randomBetween(0.82, 1.24),
-                })
-                cursor += duration + randomBetween(35, 150)
-              }
-              faceFlashes.set(faceName, {
-                signalID: signal.id,
-                mode: "fancy",
-                startedAt: now,
-                duration: cursor + 260,
-                bursts,
-              })
-            }
-            continue
-          }
-
-          const faceName = chooseUnlitFace()
-          if (!faceName) continue
-          faceFlashes.set(faceName, {
-            signalID: signal.id,
-            mode: "single",
-            startedAt: now,
-            duration: 1320,
-            bursts: [{ at: 0, duration: 1320, color: randomSessionGlowColor(), peak: 1 }],
-          })
-        }
-
-        // Keep the handled set bounded; only the latest signals are sent by the host.
-        if (handledSignalIDs.size > 80) {
-          const liveIDs = new Set((signals || []).map((signal) => signal?.id).filter(Boolean))
-          for (const id of Array.from(handledSignalIDs)) {
-            if (!liveIDs.has(id)) handledSignalIDs.delete(id)
-          }
-        }
+        cubeVisual.processSignals(signals, now)
       }
 
       function applyFlashFaces(now) {
-        const litFaces = new Set(sessionFaceMap.values())
-        const active = {}
-        for (const [faceName, flash] of Array.from(faceFlashes.entries())) {
-          const elapsed = now - flash.startedAt
-          if (elapsed >= flash.duration || litFaces.has(faceName)) {
-            faceFlashes.delete(faceName)
-            continue
-          }
-
-          const progress = elapsed / flash.duration
-          let strength = 0
-          let color = undefined
-          for (const burst of flash.bursts || []) {
-            const burstElapsed = elapsed - burst.at
-            if (burstElapsed < 0 || burstElapsed > burst.duration) continue
-            const burstProgress = burstElapsed / burst.duration
-            const pulses = flash.mode === "single"
-              ? Math.sin(progress * Math.PI * 6)
-              : Math.sin(burstProgress * Math.PI)
-            const burstStrength = Math.max(0, pulses) * (burst.peak || 1) * (1 - progress * 0.08)
-            if (burstStrength > strength) {
-              strength = burstStrength
-              color = burst.color
-            }
-          }
-          if (strength <= 0.01) {
-            active[faceName] = { strength: 0, signalID: flash.signalID }
-            continue
-          }
-
+        const view = cubeVisual.computeFlashFaces(now)
+        for (const [faceName, style] of Object.entries(view.faceStyles)) {
           const face = faceMeshes.get(faceName)
           const glow = glowMeshes.get(faceName)
-          color ??= randomSessionGlowColor()
+          const color = style.color
           const threeColor = new THREE.Color(color.r / 255, color.g / 255, color.b / 255)
-          face.material.color.copy(threeColor).lerp(new THREE.Color(0xffffff), 0.70)
+          face.material.color.copy(threeColor).lerp(new THREE.Color(0xffffff), style.faceLerp ?? 0.70)
           glow.material.color.setRGB(color.r / 255, color.g / 255, color.b / 255)
-          glow.material.opacity = 0.18 + strength * 0.82
-          glow.scale.setScalar(1.00 + strength * 0.32)
-          active[faceName] = { strength, signalID: flash.signalID }
+          glow.material.opacity = style.glowOpacity
+          glow.scale.setScalar(style.glowScale)
         }
-        return active
+        return view.active
       }
 
       function applyPermissionGlowFaces(permissions, now) {
-        const pendingSessionIDs = new Set(
-          (permissions || [])
-            .map((permission) => permission?.sessionID)
-            .filter((sessionID) => typeof sessionID === "string"),
-        )
-        const active = {}
-        const wave = (Math.sin(now * 0.0095) + 1) / 2
-        const pulse = Math.pow(wave, 1.85)
+        const view = cubeVisual.computeAttentionFaces(permissions, now)
 
         for (const faceName of faceOrder) {
           const permissionGlow = permissionGlowMeshes.get(faceName)
           if (!permissionGlow) continue
-
-          const sessionID = Array.from(pendingSessionIDs).find((id) => sessionFaceMap.get(id) === faceName)
-          if (!sessionID) {
+          const style = view.faceStyles[faceName]
+          if (!style?.active) {
             permissionGlow.material.opacity = 0
             permissionGlow.scale.setScalar(1)
             continue
           }
-
-          const color = sessionColorMap.get(sessionID) || randomSessionGlowColor()
+          const color = style.color
           permissionGlow.material.color.setRGB(color.r / 255, color.g / 255, color.b / 255)
-          permissionGlow.material.opacity = 0.14 + pulse * 0.60
-          permissionGlow.scale.setScalar(1.06 + pulse * 0.42)
-          active[faceName] = { sessionID, pulse, pending: true, color: color.name, rgb: [color.r, color.g, color.b] }
+          permissionGlow.material.opacity = style.opacity
+          permissionGlow.scale.setScalar(style.scale)
         }
 
-        return active
+        return view.active
       }
 
       window.__setPetState = setSnapshot
@@ -1650,46 +1375,26 @@ function petHtml3D() {
         const busyCount = sessions.filter((session) => session.state === "busy").length
         const isBusy = busyCount > 0
 
-        // Keep the same randomized torque model in both busy and idle modes.
-        // Busy uses low friction, so the cube accelerates into active motion.
-        // Idle keeps receiving random torque, but high friction turns it into a
-        // subtle breathing/drifting motion instead of stopping completely.
-        if (isBusy !== wasBusy) setNextTorque(now)
-        if (now >= nextTorqueAt) setNextTorque(now)
-        wasBusy = isBusy
         stage.classList.toggle("has-busy", isBusy)
         stage.classList.toggle("has-sessions", sessions.length > 0)
 
-        const inertia = 1.18
-        const baseFriction = isBusy ? 0.58 : 2.85
-        const holdMultiplier = updateFrictionHold(dt)
-        const friction = baseFriction * holdMultiplier
-        angularVelocity.x += (torque.x / inertia) * dt
-        angularVelocity.y += (torque.y / inertia) * dt
-        angularVelocity.z += (torque.z / inertia) * dt
-        const damping = Math.exp(-friction * dt)
-        angularVelocity.x *= damping
-        angularVelocity.y *= damping
-        angularVelocity.z *= damping
-        clampMagnitude(angularVelocity, 1400)
-
-        rotation.x += angularVelocity.x * dt
-        rotation.y += angularVelocity.y * dt
-        rotation.z += angularVelocity.z * dt
+        const runtimeDebug = cubeRuntime.tick({ now, dt, isBusy, frictionHoldActive })
+        frictionHoldLevel = runtimeDebug.frictionHoldLevel || 0
         cubeGroup.rotation.x = rad(rotation.x)
         cubeGroup.rotation.y = rad(rotation.y)
         cubeGroup.rotation.z = rad(rotation.z)
         cubeGroup.updateMatrixWorld(true)
 
-        const speed = magnitude(angularVelocity)
-        const speedRatio = Math.min(1, speed / 1400)
-        const glow = Math.pow(speedRatio, 2.3)
+        const speed = runtimeDebug.speed
+        const speedRatio = runtimeDebug.speedRatio
+        const glow = runtimeDebug.glow
         const glowR = Math.round(92 + (0 - 92) * glow)
         const glowG = Math.round(255 + (190 - 255) * glow)
         const glowB = Math.round(232 + (210 - 232) * glow)
         const dragParticles = updateDragParticles(now, frictionHoldLevel, speed, dt)
         const busyFaces = syncBusyFaces(sessions, speed)
-        const toolParticles = updateToolParticles(sessions, dt, now)
+        const toolEmissionPlan = cubeVisual.computeToolEmitters(sessions, dt, now)
+        const toolParticles = updateToolParticles(toolEmissionPlan, dt)
         processSignals(snapshot.signals || [], now)
         const helloFlashes = applyFlashFaces(now)
         const pendingAttention = [...(snapshot.permissions || []), ...(snapshot.questions || [])]
@@ -1706,19 +1411,19 @@ function petHtml3D() {
           })),
           rotation: { ...rotation },
           angularVelocity: { ...angularVelocity },
-          torque: { ...torque },
-          friction,
-          baseFriction,
+          torque: runtimeDebug.torque,
+          friction: runtimeDebug.friction,
+          baseFriction: runtimeDebug.baseFriction,
           frictionHoldActive,
-          frictionHoldMultiplier: holdMultiplier,
+          frictionHoldMultiplier: runtimeDebug.frictionHoldMultiplier,
           frictionHoldLevel,
           speed,
           speedRatio,
-          nextTorqueAt,
+          nextTorqueAt: runtimeDebug.nextTorqueAt,
+          activeDisturbances: runtimeDebug.activeDisturbances,
           glow,
           dragParticles,
           toolParticles,
-          colorReleaseSpeed,
           glowColor: { r: glowR, g: glowG, b: glowB },
           faceRotations,
           busyFaces,
