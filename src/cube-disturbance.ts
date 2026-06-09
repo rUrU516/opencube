@@ -3,6 +3,7 @@ import { AngularDampingDisturbance } from "./cube-disturbances/angular-damping"
 import { RandomAngularKickDisturbance } from "./cube-disturbances/random-angular-kick"
 
 export interface Disturbance {
+  done?: boolean
   apply(state: CubeState, dt: number): void
 }
 
@@ -28,5 +29,7 @@ export class DisturbancePool {
     for (const disturbance of this.disturbances) {
       disturbance.apply(state, dt)
     }
+
+    this.disturbances = this.disturbances.filter((disturbance) => !disturbance.done)
   }
 }
