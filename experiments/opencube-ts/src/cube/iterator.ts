@@ -1,5 +1,5 @@
-import type { CubeState } from "./cube-state"
-import { DisturbancePool } from "./cube-disturbance"
+import type { CubeState } from "./state"
+import { DisturbancePool } from "./disturbance"
 
 export class CubeIterator {
   state: CubeState
