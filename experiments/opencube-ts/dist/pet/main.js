@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const state_1 = require("../opencode/state");
 const cube_1 = require("../cube/cube");
 const state_2 = require("../cube/state");
+const cube_effect_controller_1 = require("../engine/cube-effect-controller");
 const { app, BrowserWindow, Menu, Tray, nativeImage, screen: electronScreen } = require("electron");
 const fs = require("node:fs");
 const http = require("node:http");
@@ -22,9 +23,11 @@ const openCodeState = new state_1.OpenCodeState();
 const cube = new cube_1.Cube(new state_2.CubeState({
     rotation: { x: -14, y: -28, z: 0 },
     angularVelocity: { x: 0, y: 0, z: 0 },
-    faces: Array.from({ length: 6 }, () => ({ color: { r: 255, g: 255, b: 255 }, brightness: 1 })),
+    faces: Array.from({ length: 6 }, () => ({ color: { r: 255, g: 255, b: 255 }, brightness: 0 })),
     particles: [],
 }));
+const cubeEffectController = new cube_effect_controller_1.CubeEffectController(cube);
+openCodeState.onEvent((event, state) => cubeEffectController.sync(state, event));
 function createIconDataUrl() {
     try {
         const png = fs.readFileSync(ICON_PATH);
@@ -155,6 +158,7 @@ function petHtml() {
       const cubeGroup = new THREE.Group()
       scene.add(cubeGroup)
       const faceGeometry = new THREE.PlaneGeometry(0.60, 0.60)
+      const glowGeometry = new THREE.PlaneGeometry(1.18, 1.18)
       const iconTexture = new THREE.TextureLoader().load("${iconUrl}")
       iconTexture.colorSpace = THREE.SRGBColorSpace
       iconTexture.generateMipmaps = false
@@ -167,7 +171,27 @@ function petHtml() {
         alphaTest: 0.02,
         side: THREE.DoubleSide,
       })
+      const glowTexture = createGlowTexture()
       const rad = THREE.MathUtils.degToRad
+      const faceGlows = []
+
+      function createGlowTexture() {
+        const canvas = document.createElement("canvas")
+        canvas.width = 256
+        canvas.height = 256
+        const ctx = canvas.getContext("2d")
+        const gradient = ctx.createRadialGradient(128, 128, 4, 128, 128, 124)
+        gradient.addColorStop(0, "rgba(255,255,255,1)")
+        gradient.addColorStop(0.18, "rgba(255,255,255,1)")
+        gradient.addColorStop(0.46, "rgba(255,255,255,.62)")
+        gradient.addColorStop(0.80, "rgba(255,255,255,.22)")
+        gradient.addColorStop(1, "rgba(255,255,255,0)")
+        ctx.fillStyle = gradient
+        ctx.fillRect(0, 0, 256, 256)
+        const texture = new THREE.CanvasTexture(canvas)
+        texture.colorSpace = THREE.SRGBColorSpace
+        return texture
+      }
 
       function randomChoice(items) {
         return items[Math.floor(Math.random() * items.length)]
@@ -185,7 +209,24 @@ function petHtml() {
         }
       }
 
-      function createFace(position, rotation) {
+      function createFace(position, rotation, glowPosition) {
+        const glow = new THREE.Mesh(
+          glowGeometry,
+          new THREE.MeshBasicMaterial({
+            map: glowTexture,
+            color: 0xffffff,
+            transparent: true,
+            opacity: 0,
+            blending: THREE.AdditiveBlending,
+            depthWrite: false,
+            side: THREE.DoubleSide,
+          }),
+        )
+        glow.position.set(...glowPosition)
+        glow.rotation.set(...rotation)
+        cubeGroup.add(glow)
+        faceGlows.push(glow)
+
         const face = new THREE.Mesh(faceGeometry, iconMaterial.clone())
         face.position.set(...position)
         face.rotation.set(...rotation)
@@ -193,18 +234,29 @@ function petHtml() {
       }
 
       const faceRotations = makeFaceRotations()
-      createFace([0, 0, 0.30], [0, 0, rad(faceRotations.front || 0)])
-      createFace([0, 0, -0.30], [0, Math.PI, rad(faceRotations.back || 0)])
-      createFace([0.30, 0, 0], [0, Math.PI / 2, rad(faceRotations.right || 0)])
-      createFace([-0.30, 0, 0], [0, -Math.PI / 2, rad(faceRotations.left || 0)])
-      createFace([0, 0.30, 0], [-Math.PI / 2, 0, rad(faceRotations.top || 0)])
-      createFace([0, -0.30, 0], [Math.PI / 2, 0, rad(faceRotations.bottom || 0)])
+      createFace([0, 0, 0.30], [0, 0, rad(faceRotations.front || 0)], [0, 0, 0.314])
+      createFace([0, 0, -0.30], [0, Math.PI, rad(faceRotations.back || 0)], [0, 0, -0.314])
+      createFace([0.30, 0, 0], [0, Math.PI / 2, rad(faceRotations.right || 0)], [0.314, 0, 0])
+      createFace([-0.30, 0, 0], [0, -Math.PI / 2, rad(faceRotations.left || 0)], [-0.314, 0, 0])
+      createFace([0, 0.30, 0], [-Math.PI / 2, 0, rad(faceRotations.top || 0)], [0, 0.314, 0])
+      createFace([0, -0.30, 0], [Math.PI / 2, 0, rad(faceRotations.bottom || 0)], [0, -0.314, 0])
 
       function applyCubeState(state) {
         const rotation = state?.rotation || { x: -14, y: -28, z: 0 }
         cubeGroup.rotation.x = rad(rotation.x || 0)
         cubeGroup.rotation.y = rad(rotation.y || 0)
         cubeGroup.rotation.z = rad(rotation.z || 0)
+
+        const faces = Array.isArray(state?.faces) ? state.faces : []
+        for (let index = 0; index < faceGlows.length; index += 1) {
+          const glow = faceGlows[index]
+          const face = faces[index]
+          const brightness = typeof face?.brightness === "number" ? face.brightness : 0
+          const color = face?.color || { r: 255, g: 255, b: 255 }
+          glow.material.color.setRGB((color.r || 0) / 255, (color.g || 0) / 255, (color.b || 0) / 255)
+          glow.material.opacity = Math.max(0, Math.min(0.98, brightness * 0.98))
+          glow.scale.setScalar(1 + Math.max(0, Math.min(1, brightness)) * 0.24)
+        }
       }
 
       ipcRenderer.on("cube-state", (_event, state) => {
@@ -419,8 +471,9 @@ function startServer() {
             if (req.method === "POST" && url.pathname === "/event") {
                 const body = await readRequestJson(req);
                 const canonicalEvent = toOpenCodeEvent(body);
-                const changes = canonicalEvent ? openCodeState.applyEvent(canonicalEvent) : [];
-                const item = { ...body, changes, id: `${Date.now()}-${Math.random().toString(16).slice(2)}`, at: Date.now() };
+                if (canonicalEvent)
+                    openCodeState.applyEvent(canonicalEvent);
+                const item = { ...body, id: `${Date.now()}-${Math.random().toString(16).slice(2)}`, at: Date.now() };
                 events = [item, ...events].slice(0, 50);
                 updatePanel();
                 return json(res, 200, { ok: true, event: item });

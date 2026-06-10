@@ -7,29 +7,45 @@ export interface Disturbance {
   apply(state: CubeState, dt: number): void
 }
 
+type DisturbanceEntry = {
+  id?: string
+  disturbance: Disturbance
+}
+
 export class DisturbancePool {
-  disturbances: Disturbance[]
+  disturbances: DisturbanceEntry[]
 
   constructor(disturbances: Disturbance[] = []) {
     this.disturbances = [
-      new RandomAngularKickDisturbance({
-        interval: 4,
-        strength: { x: 80, y: 80, z: 80 },
-      }),
-      new AngularDampingDisturbance(2.0),
-      ...disturbances,
+      {
+        id: "global:random-angular-kick",
+        disturbance: new RandomAngularKickDisturbance({
+          interval: 4,
+          strength: { x: 80, y: 80, z: 80 },
+        }),
+      },
+      { id: "global:base-damping", disturbance: new AngularDampingDisturbance(2.0) },
+      ...disturbances.map((disturbance) => ({ disturbance })),
     ]
   }
 
-  add(disturbance: Disturbance) {
-    this.disturbances.push(disturbance)
+  add(disturbance: Disturbance, id?: string) {
+    if (id) this.markDone(id)
+    this.disturbances.push({ id, disturbance })
+  }
+
+  markDone(id: string) {
+    for (const entry of this.disturbances) {
+      if (entry.id === id) entry.disturbance.done = true
+    }
   }
 
   apply(state: CubeState, dt: number) {
-    for (const disturbance of this.disturbances) {
-      disturbance.apply(state, dt)
+    for (const entry of this.disturbances) {
+      if (entry.disturbance.done) continue
+      entry.disturbance.apply(state, dt)
     }
 
-    this.disturbances = this.disturbances.filter((disturbance) => !disturbance.done)
+    this.disturbances = this.disturbances.filter((entry) => !entry.disturbance.done)
   }
 }

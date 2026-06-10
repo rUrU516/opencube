@@ -12,8 +12,11 @@ class Cube {
         this.disturbancePool = new disturbance_1.DisturbancePool();
         this.iterator = new iterator_1.CubeIterator(this.state, this.disturbancePool);
     }
-    addDisturbance(disturbance) {
-        this.disturbancePool.add(disturbance);
+    addDisturbance(disturbance, id) {
+        this.disturbancePool.add(disturbance, id);
+    }
+    markDisturbanceDone(id) {
+        this.disturbancePool.markDone(id);
     }
     tick(dt) {
         this.iterator.step(dt);

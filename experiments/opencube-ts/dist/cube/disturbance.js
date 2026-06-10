@@ -7,22 +7,35 @@ class DisturbancePool {
     disturbances;
     constructor(disturbances = []) {
         this.disturbances = [
-            new random_angular_kick_1.RandomAngularKickDisturbance({
-                interval: 4,
-                strength: { x: 80, y: 80, z: 80 },
-            }),
-            new angular_damping_1.AngularDampingDisturbance(2.0),
-            ...disturbances,
+            {
+                id: "global:random-angular-kick",
+                disturbance: new random_angular_kick_1.RandomAngularKickDisturbance({
+                    interval: 4,
+                    strength: { x: 80, y: 80, z: 80 },
+                }),
+            },
+            { id: "global:base-damping", disturbance: new angular_damping_1.AngularDampingDisturbance(2.0) },
+            ...disturbances.map((disturbance) => ({ disturbance })),
         ];
     }
-    add(disturbance) {
-        this.disturbances.push(disturbance);
+    add(disturbance, id) {
+        if (id)
+            this.markDone(id);
+        this.disturbances.push({ id, disturbance });
+    }
+    markDone(id) {
+        for (const entry of this.disturbances) {
+            if (entry.id === id)
+                entry.disturbance.done = true;
+        }
     }
     apply(state, dt) {
-        for (const disturbance of this.disturbances) {
-            disturbance.apply(state, dt);
+        for (const entry of this.disturbances) {
+            if (entry.disturbance.done)
+                continue;
+            entry.disturbance.apply(state, dt);
         }
-        this.disturbances = this.disturbances.filter((disturbance) => !disturbance.done);
+        this.disturbances = this.disturbances.filter((entry) => !entry.disturbance.done);
     }
 }
 exports.DisturbancePool = DisturbancePool;

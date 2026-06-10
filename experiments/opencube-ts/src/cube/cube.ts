@@ -13,8 +13,12 @@ export class Cube {
     this.iterator = new CubeIterator(this.state, this.disturbancePool)
   }
 
-  addDisturbance(disturbance: Disturbance) {
-    this.disturbancePool.add(disturbance)
+  addDisturbance(disturbance: Disturbance, id?: string) {
+    this.disturbancePool.add(disturbance, id)
+  }
+
+  markDisturbanceDone(id: string) {
+    this.disturbancePool.markDone(id)
   }
 
   tick(dt: number) {
