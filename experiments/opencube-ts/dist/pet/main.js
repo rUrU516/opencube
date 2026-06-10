@@ -1,19 +1,40 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 const state_1 = require("../opencode/state");
+const cube_1 = require("../cube/cube");
+const state_2 = require("../cube/state");
 const { app, BrowserWindow, Menu, Tray, nativeImage, screen: electronScreen } = require("electron");
+const fs = require("node:fs");
 const http = require("node:http");
 const path = require("node:path");
 const APP_NAME = "OpenCube TS Experiment";
 const HOST = "127.0.0.1";
 const PORT = Number(process.env.OPENCODE_TS_PET_PORT || process.env.OPENCODE_PET_PORT || 47833);
 const ICON_PATH = path.resolve(__dirname, "../../../../assets/opencode-icon.png");
+const PET_RENDER_SIZE = 120;
 let petWindow = null;
 let panelWindow = null;
 let tray = null;
 let server = null;
+let cubeTickTimer = null;
 let events = [];
 const openCodeState = new state_1.OpenCodeState();
+const cube = new cube_1.Cube(new state_2.CubeState({
+    rotation: { x: -14, y: -28, z: 0 },
+    angularVelocity: { x: 0, y: 0, z: 0 },
+    faces: Array.from({ length: 6 }, () => ({ color: { r: 255, g: 255, b: 255 }, brightness: 1 })),
+    particles: [],
+}));
+function createIconDataUrl() {
+    try {
+        const png = fs.readFileSync(ICON_PATH);
+        return `data:image/png;base64,${png.toString("base64")}`;
+    }
+    catch {
+        const fallback = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96"><rect width="96" height="96" rx="20" fill="#111"/><rect x="30" y="18" width="36" height="60" fill="#f4f4ef"/><rect x="40" y="32" width="16" height="32" fill="#050505"/></svg>`;
+        return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(fallback)}`;
+    }
+}
 function toOpenCodeEvent(event) {
     const type = event.type;
     const sessionID = typeof event.sessionID === "string" ? event.sessionID : undefined;
@@ -103,28 +124,102 @@ async function readRequestJson(req) {
     return JSON.parse(Buffer.concat(chunks).toString("utf8"));
 }
 function petHtml() {
+    const threeCjsPath = JSON.stringify(path.join(path.dirname(require.resolve("three")), "three.cjs"));
+    const iconUrl = createIconDataUrl();
     return `<!doctype html>
 <html>
   <head>
     <meta charset="utf-8" />
     <style>
       html, body { margin: 0; width: 100%; height: 100%; background: transparent; overflow: hidden; }
-      .cube {
-        width: 72px;
-        height: 72px;
-        margin: 24px;
-        border-radius: 18px;
-        background: linear-gradient(135deg, #fff, #aaf7ff 55%, #ffe08a);
-        box-shadow: 0 0 24px rgba(120, 240, 255, 0.75);
-        display: grid;
-        place-items: center;
-        color: #111;
-        font: 700 20px system-ui, sans-serif;
-        user-select: none;
-      }
+      .stage { box-sizing: border-box; width: 100%; height: 100%; position: relative; background: transparent; user-select: none; -webkit-app-region: drag; cursor: grab; }
+      .stage:active { cursor: grabbing; }
+      #scene { position: absolute; inset: 0; width: ${PET_RENDER_SIZE}px; height: ${PET_RENDER_SIZE}px; pointer-events: none; }
     </style>
   </head>
-  <body><div class="cube">TS</div></body>
+  <body>
+    <div class="stage"><canvas id="scene" aria-label="OpenCube TS cube"></canvas></div>
+    <script>
+      const THREE = require(${threeCjsPath})
+      const { ipcRenderer } = require("electron")
+      const canvas = document.getElementById("scene")
+      const scene = new THREE.Scene()
+      const camera = new THREE.PerspectiveCamera(34, 1, 0.1, 20)
+      camera.position.set(0, 0.04, 3.25)
+      const renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true })
+      renderer.setClearColor(0x000000, 0)
+      renderer.setPixelRatio(Math.min((window.devicePixelRatio || 1) * 1.5, 3))
+      renderer.outputColorSpace = THREE.SRGBColorSpace
+      renderer.setSize(${PET_RENDER_SIZE}, ${PET_RENDER_SIZE}, false)
+
+      const cubeGroup = new THREE.Group()
+      scene.add(cubeGroup)
+      const faceGeometry = new THREE.PlaneGeometry(0.60, 0.60)
+      const iconTexture = new THREE.TextureLoader().load("${iconUrl}")
+      iconTexture.colorSpace = THREE.SRGBColorSpace
+      iconTexture.generateMipmaps = false
+      iconTexture.minFilter = THREE.LinearFilter
+      iconTexture.magFilter = THREE.LinearFilter
+      iconTexture.anisotropy = Math.min(renderer.capabilities.getMaxAnisotropy?.() || 8, 16)
+      const iconMaterial = new THREE.MeshBasicMaterial({
+        map: iconTexture,
+        transparent: true,
+        alphaTest: 0.02,
+        side: THREE.DoubleSide,
+      })
+      const rad = THREE.MathUtils.degToRad
+
+      function randomChoice(items) {
+        return items[Math.floor(Math.random() * items.length)]
+      }
+
+      function makeFaceRotations() {
+        const quarterTurns = [0, 90, 180, 270]
+        return {
+          front: Math.random() < 0.7 ? 0 : randomChoice(quarterTurns),
+          back: randomChoice(quarterTurns),
+          right: randomChoice(quarterTurns),
+          left: randomChoice(quarterTurns),
+          top: randomChoice(quarterTurns),
+          bottom: randomChoice(quarterTurns),
+        }
+      }
+
+      function createFace(position, rotation) {
+        const face = new THREE.Mesh(faceGeometry, iconMaterial.clone())
+        face.position.set(...position)
+        face.rotation.set(...rotation)
+        cubeGroup.add(face)
+      }
+
+      const faceRotations = makeFaceRotations()
+      createFace([0, 0, 0.30], [0, 0, rad(faceRotations.front || 0)])
+      createFace([0, 0, -0.30], [0, Math.PI, rad(faceRotations.back || 0)])
+      createFace([0.30, 0, 0], [0, Math.PI / 2, rad(faceRotations.right || 0)])
+      createFace([-0.30, 0, 0], [0, -Math.PI / 2, rad(faceRotations.left || 0)])
+      createFace([0, 0.30, 0], [-Math.PI / 2, 0, rad(faceRotations.top || 0)])
+      createFace([0, -0.30, 0], [Math.PI / 2, 0, rad(faceRotations.bottom || 0)])
+
+      function applyCubeState(state) {
+        const rotation = state?.rotation || { x: -14, y: -28, z: 0 }
+        cubeGroup.rotation.x = rad(rotation.x || 0)
+        cubeGroup.rotation.y = rad(rotation.y || 0)
+        cubeGroup.rotation.z = rad(rotation.z || 0)
+      }
+
+      ipcRenderer.on("cube-state", (_event, state) => {
+        applyCubeState(state)
+      })
+
+      function tick() {
+        renderer.render(scene, camera)
+        requestAnimationFrame(tick)
+      }
+
+      applyCubeState({ rotation: { x: -14, y: -28, z: 0 } })
+      requestAnimationFrame(tick)
+    </script>
+  </body>
 </html>`;
 }
 function escapeHtml(value) {
@@ -188,8 +283,8 @@ function createPetWindow() {
     if (petWindow && !petWindow.isDestroyed())
         return petWindow;
     petWindow = new BrowserWindow({
-        width: 120,
-        height: 120,
+        width: PET_RENDER_SIZE,
+        height: PET_RENDER_SIZE,
         show: false,
         frame: false,
         resizable: false,
@@ -199,6 +294,10 @@ function createPetWindow() {
         hasShadow: false,
         title: APP_NAME,
         icon: ICON_PATH,
+        webPreferences: {
+            contextIsolation: false,
+            nodeIntegration: true,
+        },
     });
     petWindow.setAlwaysOnTop(true, "floating");
     petWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(petHtml())}`);
@@ -207,8 +306,34 @@ function createPetWindow() {
     });
     return petWindow;
 }
+function sendCubeState() {
+    if (!petWindow || petWindow.isDestroyed())
+        return;
+    petWindow.webContents.send("cube-state", cube.snapshot());
+}
+function startCubeTicker() {
+    if (cubeTickTimer)
+        return;
+    let lastTick = Date.now();
+    cubeTickTimer = setInterval(() => {
+        const now = Date.now();
+        const dt = Math.min(0.064, (now - lastTick) / 1000);
+        lastTick = now;
+        cube.tick(dt);
+        sendCubeState();
+    }, 1000 / 60);
+    cubeTickTimer.unref?.();
+}
+function stopCubeTicker() {
+    if (!cubeTickTimer)
+        return;
+    clearInterval(cubeTickTimer);
+    cubeTickTimer = null;
+}
 function showPet() {
     const win = createPetWindow();
+    startCubeTicker();
+    sendCubeState();
     win.show();
     win.moveTop();
 }
@@ -324,6 +449,7 @@ app.whenReady().then(() => {
 });
 app.on("before-quit", () => {
     try {
+        stopCubeTicker();
         server?.close();
     }
     catch { }

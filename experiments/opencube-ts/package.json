@@ -12,7 +12,8 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "electron": "^39.2.6"
+    "electron": "^39.2.6",
+    "three": "^0.184.0"
   },
   "devDependencies": {
     "typescript": "^5.9.3"
