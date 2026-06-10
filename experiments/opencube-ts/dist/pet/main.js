@@ -1,14 +1,90 @@
 "use strict";
-const { app, BrowserWindow, Menu, Tray, nativeImage } = require("electron");
+Object.defineProperty(exports, "__esModule", { value: true });
+const state_1 = require("../opencode/state");
+const { app, BrowserWindow, Menu, Tray, nativeImage, screen: electronScreen } = require("electron");
 const http = require("node:http");
 const path = require("node:path");
 const APP_NAME = "OpenCube TS Experiment";
 const HOST = "127.0.0.1";
 const PORT = Number(process.env.OPENCODE_TS_PET_PORT || process.env.OPENCODE_PET_PORT || 47833);
+const ICON_PATH = path.resolve(__dirname, "../../../../assets/opencode-icon.png");
 let petWindow = null;
+let panelWindow = null;
 let tray = null;
 let server = null;
 let events = [];
+const openCodeState = new state_1.OpenCodeState();
+function toOpenCodeEvent(event) {
+    const type = event.type;
+    const sessionID = typeof event.sessionID === "string" ? event.sessionID : undefined;
+    if (!sessionID || typeof type !== "string")
+        return undefined;
+    if (type === "busy")
+        return { type: "session.busy", sessionID };
+    if (type === "retry")
+        return { type: "session.retry", sessionID };
+    if (type === "idle")
+        return { type: "session.idle", sessionID };
+    if (type === "tool.start" || type === "tool.finish") {
+        const callID = typeof event.callID === "string" ? event.callID : undefined;
+        if (!callID)
+            return undefined;
+        const tool = typeof event.tool === "string" ? event.tool : undefined;
+        return { type, sessionID, callID, tool };
+    }
+    if (type === "permission.ask") {
+        const requestID = typeof event.requestID === "string" ? event.requestID : undefined;
+        if (!requestID)
+            return undefined;
+        const permission = typeof event.permission === "string" ? event.permission : undefined;
+        return { type, sessionID, requestID, permission };
+    }
+    if (type === "permission.reply") {
+        const requestID = typeof event.requestID === "string" ? event.requestID : undefined;
+        if (!requestID)
+            return undefined;
+        const reply = typeof event.reply === "string" ? event.reply : undefined;
+        return { type, sessionID, requestID, reply };
+    }
+    if (type === "question.ask") {
+        const requestID = typeof event.requestID === "string" ? event.requestID : undefined;
+        if (!requestID)
+            return undefined;
+        const questionCount = typeof event.questionCount === "number" ? event.questionCount : undefined;
+        return { type, sessionID, requestID, questionCount };
+    }
+    if (type === "question.reply" || type === "question.reject") {
+        const requestID = typeof event.requestID === "string" ? event.requestID : undefined;
+        if (!requestID)
+            return undefined;
+        return { type, sessionID, requestID };
+    }
+    return undefined;
+}
+function sessionSnapshot(session) {
+    return {
+        sessionID: session.sessionID,
+        status: session.status,
+        activeTools: Array.from(session.activeTools),
+        pendingPermissions: Array.from(session.pendingPermissions),
+        pendingQuestions: Array.from(session.pendingQuestions),
+    };
+}
+function openCodeStateSnapshot() {
+    const sessions = Array.from(openCodeState.sessions.values()).map(sessionSnapshot);
+    return {
+        sessions,
+        totals: {
+            sessions: sessions.length,
+            busy: sessions.filter((session) => session.status === "busy").length,
+            retry: sessions.filter((session) => session.status === "retry").length,
+            idle: sessions.filter((session) => session.status === "idle").length,
+            tools: sessions.reduce((total, session) => total + session.activeTools.length, 0),
+            permissions: sessions.reduce((total, session) => total + session.pendingPermissions.length, 0),
+            questions: sessions.reduce((total, session) => total + session.pendingQuestions.length, 0),
+        },
+    };
+}
 function json(res, status, body) {
     res.writeHead(status, {
         "content-type": "application/json",
@@ -51,6 +127,63 @@ function petHtml() {
   <body><div class="cube">TS</div></body>
 </html>`;
 }
+function escapeHtml(value) {
+    return String(value)
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#39;");
+}
+function panelHtml() {
+    const state = openCodeStateSnapshot();
+    const stateRows = state.sessions
+        .map((session, index) => {
+        const sessionID = escapeHtml(session.sessionID);
+        const status = escapeHtml(session.status);
+        const json = escapeHtml(JSON.stringify(session, null, 2));
+        return `<section class="state-card open"><header><span>#${index + 1}</span><strong>${sessionID}</strong><em>${status}</em><small>T${session.activeTools.length} P${session.pendingPermissions.length} Q${session.pendingQuestions.length}</small></header><pre>${json}</pre></section>`;
+    })
+        .join("");
+    const rows = events
+        .slice(0, 50)
+        .map((event, index) => {
+        const type = escapeHtml(event.type || "event");
+        const at = typeof event.at === "number" ? new Date(event.at).toLocaleTimeString() : "";
+        const json = escapeHtml(JSON.stringify(event, null, 2));
+        return `<section class="event"><header><span>#${index + 1}</span><strong>${type}</strong><time>${escapeHtml(at)}</time></header><pre>${json}</pre></section>`;
+    })
+        .join("");
+    return `<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      html, body { margin: 0; width: 100%; height: 100%; background: transparent; overflow: hidden; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+      .panel { box-sizing: border-box; width: 100%; height: 100%; padding: 14px; color: #e9fbff; background: rgba(11, 16, 24, 0.92); border: 1px solid rgba(150, 240, 255, 0.35); border-radius: 16px; box-shadow: 0 18px 50px rgba(0,0,0,0.35); }
+      .top { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+      h1 { margin: 0; font: 700 14px system-ui, sans-serif; letter-spacing: 0.02em; }
+      h2 { margin: 0 0 5px; color: rgba(233,251,255,0.7); font: 700 10px system-ui, sans-serif; text-transform: uppercase; letter-spacing: 0.08em; }
+      .meta { margin-bottom: 10px; color: rgba(233,251,255,0.66); font-size: 11px; }
+      .columns { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; height: 334px; }
+      .column { min-width: 0; overflow: hidden; }
+      .state, .events { height: 314px; overflow: auto; padding-right: 4px; display: flex; flex-direction: column; }
+      .empty { color: rgba(233,251,255,0.55); font-size: 12px; }
+      .event, .state-card { margin: 0 0 4px; padding: 4px 8px; border-radius: 8px; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.08); cursor: pointer; }
+      .state-card { background: rgba(159,247,255,0.055); border-color: rgba(159,247,255,0.12); }
+      .event.open, .state-card.open { margin-bottom: 10px; padding: 10px; border-radius: 12px; }
+      header { display: flex; gap: 8px; align-items: center; margin-bottom: 0; color: #9ff7ff; font-size: 10px; line-height: 1.2; }
+      .event.open header, .state-card.open header { margin-bottom: 6px; font-size: 11px; }
+      header em { color: #ffe08a; font-style: normal; }
+      header small { color: rgba(233,251,255,0.58); }
+      header time { margin-left: auto; color: rgba(233,251,255,0.5); }
+      pre { display: none; margin: 0; white-space: pre-wrap; word-break: break-word; color: rgba(233,251,255,0.86); font-size: 11px; line-height: 1.35; }
+      .event.open pre, .state-card.open pre { display: block; }
+    </style>
+  </head>
+  <body><main class="panel"><div class="top"><h1>OpenCube TS Debug Panel</h1></div><div class="meta">Sessions ${state.totals.sessions} · busy ${state.totals.busy} · retry ${state.totals.retry} · tools ${state.totals.tools} · permissions ${state.totals.permissions} · questions ${state.totals.questions}</div><div class="columns"><section class="column"><h2>OpenCode State</h2><div class="state">${stateRows || '<div class="empty">No sessions yet.</div>'}</div></section><section class="column"><h2>Raw Events</h2><div class="events">${rows || '<div class="empty">No events yet.</div>'}</div></section></div></main><script>document.querySelectorAll(".event,.state-card").forEach((card) => card.addEventListener("click", () => card.classList.toggle("open")))</script></body>
+</html>`;
+}
 function createPetWindow() {
     if (petWindow && !petWindow.isDestroyed())
         return petWindow;
@@ -65,6 +198,7 @@ function createPetWindow() {
         skipTaskbar: true,
         hasShadow: false,
         title: APP_NAME,
+        icon: ICON_PATH,
     });
     petWindow.setAlwaysOnTop(true, "floating");
     petWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(petHtml())}`);
@@ -78,15 +212,66 @@ function showPet() {
     win.show();
     win.moveTop();
 }
+function createPanelWindow() {
+    if (panelWindow && !panelWindow.isDestroyed())
+        return panelWindow;
+    panelWindow = new BrowserWindow({
+        width: 820,
+        height: 420,
+        show: false,
+        frame: false,
+        resizable: false,
+        transparent: true,
+        alwaysOnTop: true,
+        skipTaskbar: true,
+        hasShadow: false,
+        title: `${APP_NAME} Debug`,
+        icon: ICON_PATH,
+    });
+    panelWindow.setAlwaysOnTop(true, "floating");
+    panelWindow.on("closed", () => {
+        panelWindow = null;
+    });
+    updatePanel();
+    return panelWindow;
+}
+function updatePanel() {
+    if (!panelWindow || panelWindow.isDestroyed())
+        return;
+    panelWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(panelHtml())}`);
+}
+function positionPanel() {
+    if (!panelWindow || panelWindow.isDestroyed())
+        return;
+    const display = electronScreen.getPrimaryDisplay().workArea;
+    const bounds = panelWindow.getBounds();
+    panelWindow.setPosition(display.x + display.width - bounds.width - 20, display.y + 40, false);
+}
+function showPanel() {
+    const win = createPanelWindow();
+    updatePanel();
+    positionPanel();
+    win.show();
+    win.moveTop();
+}
+function hidePanel() {
+    if (panelWindow && !panelWindow.isDestroyed())
+        panelWindow.hide();
+}
 function createTray() {
     if (tray)
         return tray;
-    const image = nativeImage.createFromDataURL("data:image/svg+xml;utf8," +
-        encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><rect x="5" y="5" width="22" height="22" rx="7" fill="#111"/><text x="16" y="21" text-anchor="middle" font-size="11" font-family="Arial" font-weight="700" fill="#8ff">TS</text></svg>`));
+    let image = nativeImage.createFromPath(ICON_PATH);
+    if (image.isEmpty()) {
+        image = nativeImage.createFromDataURL("data:image/svg+xml;utf8," +
+            encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><rect x="5" y="5" width="22" height="22" rx="7" fill="#111"/><text x="16" y="21" text-anchor="middle" font-size="11" font-family="Arial" font-weight="700" fill="#8ff">TS</text></svg>`));
+    }
     tray = new Tray(image.resize({ width: 18, height: 18 }));
     tray.setToolTip(APP_NAME);
     tray.setContextMenu(Menu.buildFromTemplate([
         { label: "Show OpenCube TS", click: showPet },
+        { label: "Show Debug Panel", click: showPanel },
+        { label: "Hide Debug Panel", click: hidePanel },
         { label: "Quit OpenCube TS", click: () => app.quit() },
     ]));
     return tray;
@@ -108,12 +293,15 @@ function startServer() {
             }
             if (req.method === "POST" && url.pathname === "/event") {
                 const body = await readRequestJson(req);
-                const item = { ...body, id: `${Date.now()}-${Math.random().toString(16).slice(2)}`, at: Date.now() };
+                const canonicalEvent = toOpenCodeEvent(body);
+                const changes = canonicalEvent ? openCodeState.applyEvent(canonicalEvent) : [];
+                const item = { ...body, changes, id: `${Date.now()}-${Math.random().toString(16).slice(2)}`, at: Date.now() };
                 events = [item, ...events].slice(0, 50);
+                updatePanel();
                 return json(res, 200, { ok: true, event: item });
             }
             if (req.method === "GET" && url.pathname === "/state") {
-                return json(res, 200, { events });
+                return json(res, 200, { events, opencodeState: openCodeStateSnapshot() });
             }
             if (req.method === "POST" && url.pathname === "/quit") {
                 json(res, 200, { ok: true, quitting: true });

@@ -68,14 +68,94 @@ export async function server({ client }: { client: any }) {
       if (input.command === "opencube-ts-hello") {
         const result = await sendEvent({
           type: "hello",
-          message: "hello from OpenCube TS experiment 🐾",
           sessionID: input.sessionID,
-          source: "opencube-ts-plugin",
         })
         await injectNotice(client, input.sessionID, result ? "✦ OpenCube TS experiment sent hello." : "☾ OpenCube is sleeping. Start it with /opencube-ts-pet first.")
       }
 
       handled()
+    },
+
+    event: async ({ event }: { event: any }) => {
+      if (event.type === "permission.asked") {
+        const permission = event.properties || {}
+        await sendEvent({
+          type: "permission.ask",
+          sessionID: permission.sessionID,
+          requestID: permission.id,
+          permission: permission.permission,
+        })
+        return
+      }
+
+      if (event.type === "permission.replied") {
+        const permission = event.properties || {}
+        await sendEvent({
+          type: "permission.reply",
+          sessionID: permission.sessionID,
+          requestID: permission.requestID,
+          reply: permission.reply,
+        })
+        return
+      }
+
+      if (event.type === "question.asked") {
+        const question = event.properties || {}
+        await sendEvent({
+          type: "question.ask",
+          sessionID: question.sessionID,
+          requestID: question.id,
+          questionCount: Array.isArray(question.questions) ? question.questions.length : undefined,
+        })
+        return
+      }
+
+      if (event.type === "question.replied") {
+        const question = event.properties || {}
+        await sendEvent({
+          type: "question.reply",
+          sessionID: question.sessionID,
+          requestID: question.requestID,
+        })
+        return
+      }
+
+      if (event.type === "question.rejected") {
+        const question = event.properties || {}
+        await sendEvent({
+          type: "question.reject",
+          sessionID: question.sessionID,
+          requestID: question.requestID,
+        })
+        return
+      }
+
+      if (event.type === "session.status") {
+        const status = event.properties?.status?.type
+        if (status !== "busy" && status !== "retry" && status !== "idle") return
+        await sendEvent({
+          type: status,
+          sessionID: event.properties?.sessionID,
+        })
+      }
+    },
+
+    "tool.execute.before": async (input: any, output: any) => {
+      await sendEvent({
+        type: "tool.start",
+        sessionID: input.sessionID,
+        tool: input.tool,
+        callID: input.callID,
+      })
+    },
+
+    "tool.execute.after": async (input: any, output: any) => {
+      await sendEvent({
+        type: "tool.finish",
+        sessionID: input.sessionID,
+        tool: input.tool,
+        callID: input.callID,
+      })
     },
   }
 }
