@@ -12,7 +12,8 @@ const APP_NAME = "OpenCube TS Experiment"
 const HOST = "127.0.0.1"
 const PORT = Number(process.env.OPENCODE_TS_PET_PORT || process.env.OPENCODE_PET_PORT || 47833)
 const ICON_PATH = path.resolve(__dirname, "../../../../assets/opencode-icon.png")
-const PET_RENDER_SIZE = 120
+const PET_CUBE_SIZE = 120
+const PET_RENDER_SIZE = 320
 
 let petWindow: any = null
 let panelWindow: any = null
@@ -140,7 +141,18 @@ function petHtml() {
     <meta charset="utf-8" />
     <style>
       html, body { margin: 0; width: 100%; height: 100%; background: transparent; overflow: hidden; }
-      .stage { box-sizing: border-box; width: 100%; height: 100%; position: relative; background: transparent; user-select: none; -webkit-app-region: drag; cursor: grab; }
+      .stage {
+        box-sizing: border-box;
+        width: 100%;
+        height: 100%;
+        position: relative;
+        background: radial-gradient(circle at center, rgba(90, 220, 255, 0.10), rgba(90, 220, 255, 0.035) 34%, rgba(255, 255, 255, 0.018) 58%, rgba(255,255,255,0) 74%);
+        border: 1px dashed rgba(160, 245, 255, 0.38);
+        border-radius: 22px;
+        user-select: none;
+        -webkit-app-region: drag;
+        cursor: grab;
+      }
       .stage:active { cursor: grabbing; }
       #scene { position: absolute; inset: 0; width: ${PET_RENDER_SIZE}px; height: ${PET_RENDER_SIZE}px; pointer-events: none; }
     </style>
@@ -161,6 +173,8 @@ function petHtml() {
       renderer.setSize(${PET_RENDER_SIZE}, ${PET_RENDER_SIZE}, false)
 
       const cubeGroup = new THREE.Group()
+      const cubeScale = ${PET_CUBE_SIZE / PET_RENDER_SIZE}
+      cubeGroup.scale.setScalar(cubeScale)
       scene.add(cubeGroup)
       const faceGeometry = new THREE.PlaneGeometry(0.60, 0.60)
       const glowGeometry = new THREE.PlaneGeometry(1.18, 1.18)
@@ -179,6 +193,7 @@ function petHtml() {
       const glowTexture = createGlowTexture()
       const rad = THREE.MathUtils.degToRad
       const faceGlows = []
+      const particleSprites = []
 
       function createGlowTexture() {
         const canvas = document.createElement("canvas")
@@ -261,6 +276,40 @@ function petHtml() {
           glow.material.color.setRGB((color.r || 0) / 255, (color.g || 0) / 255, (color.b || 0) / 255)
           glow.material.opacity = Math.max(0, Math.min(0.98, brightness * 0.98))
           glow.scale.setScalar(1 + Math.max(0, Math.min(1, brightness)) * 0.24)
+        }
+
+        renderParticles(Array.isArray(state?.particles) ? state.particles : [])
+      }
+
+      function renderParticles(particles) {
+        const visibleParticles = particles.slice(-120)
+        while (particleSprites.length < visibleParticles.length) {
+          const material = new THREE.SpriteMaterial({
+            map: glowTexture,
+            color: 0xffffff,
+            transparent: true,
+            opacity: 0,
+            blending: THREE.AdditiveBlending,
+            depthWrite: false,
+          })
+          const sprite = new THREE.Sprite(material)
+          scene.add(sprite)
+          particleSprites.push(sprite)
+        }
+
+        for (let index = 0; index < particleSprites.length; index += 1) {
+          const sprite = particleSprites[index]
+          const particle = visibleParticles[index]
+          if (!particle) {
+            sprite.visible = false
+            sprite.material.opacity = 0
+            continue
+          }
+          sprite.visible = true
+          sprite.position.set(particle.position.x, particle.position.y, particle.position.z)
+          sprite.scale.setScalar(particle.size || 0.12)
+          sprite.material.color.setRGB((particle.color.r || 255) / 255, (particle.color.g || 255) / 255, (particle.color.b || 255) / 255)
+          sprite.material.opacity = Math.max(0, Math.min(1, particle.alpha ?? 1))
         }
       }
 
