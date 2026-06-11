@@ -13,7 +13,7 @@ const HOST = "127.0.0.1"
 const PORT = Number(process.env.OPENCODE_TS_PET_PORT || process.env.OPENCODE_PET_PORT || 47833)
 const ICON_PATH = path.resolve(__dirname, "../../../../assets/opencode-icon.png")
 const PET_CUBE_SIZE = 120
-const PET_RENDER_SIZE = 320
+const PET_RENDER_SIZE = 520
 
 let petWindow: any = null
 let panelWindow: any = null
@@ -146,9 +146,7 @@ function petHtml() {
         width: 100%;
         height: 100%;
         position: relative;
-        background: radial-gradient(circle at center, rgba(90, 220, 255, 0.10), rgba(90, 220, 255, 0.035) 34%, rgba(255, 255, 255, 0.018) 58%, rgba(255,255,255,0) 74%);
-        border: 1px dashed rgba(160, 245, 255, 0.38);
-        border-radius: 22px;
+        background: transparent;
         user-select: none;
         -webkit-app-region: drag;
         cursor: grab;
