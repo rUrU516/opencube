@@ -10,6 +10,13 @@ const BUSY_DAMPING_REDUCTION_ID = "global:busy-damping-reduction"
 const FACE_COUNT = 6
 const TOOL_PARTICLE_STOP_DELAY_MS = 2000
 
+type ToolParticleEntry = {
+  sessionID: string
+  callID: string
+  faceIndex: number
+  id: string
+}
+
 function randomBetween(min: number, max: number) {
   return min + Math.random() * (max - min)
 }
@@ -26,13 +33,13 @@ export class CubeEffectController {
   private faceOwners: Array<string | undefined>
   private faceColors: Array<Color | undefined>
   private sessionFaces: Map<string, number>
-  private toolParticleDisturbanceIDs: Map<string, string>
+  private toolParticleDisturbances: Map<string, ToolParticleEntry>
 
   constructor(private cube: Cube) {
     this.faceOwners = Array.from({ length: FACE_COUNT })
     this.faceColors = Array.from({ length: FACE_COUNT })
     this.sessionFaces = new Map()
-    this.toolParticleDisturbanceIDs = new Map()
+    this.toolParticleDisturbances = new Map()
   }
 
   sync(openCodeState: OpenCodeState, event: OpenCodeEvent) {
@@ -51,7 +58,7 @@ export class CubeEffectController {
     if (event.type === "session.idle" && this.isBusyOrRetry(previousStatus)) {
       const faceIndex = this.releaseFace(event.sessionID)
       if (faceIndex !== undefined) {
-        this.stopToolParticles(event.sessionID, faceIndex)
+        this.stopToolParticlesForSession(event.sessionID)
         this.cube.addDisturbance(new FaceDimDisturbance({ faceIndex, brightness: 0 }))
       }
 
@@ -62,12 +69,12 @@ export class CubeEffectController {
     }
 
     if (event.type === "tool.start") {
-      this.startToolParticles(openCodeState, event.sessionID)
+      this.startToolParticles(event.sessionID, event.callID)
       return
     }
 
     if (event.type === "tool.finish") {
-      this.stopToolParticlesIfLastTool(openCodeState, event.sessionID, event.callID)
+      this.stopToolParticlesAfterDelay(event.sessionID, event.callID)
       return
     }
   }
@@ -124,39 +131,44 @@ export class CubeEffectController {
     return this.sessionFaces.get(sessionID)
   }
 
-  private toolParticleDisturbanceID(sessionID: string, faceIndex: number) {
-    return `session:${sessionID}:face:${faceIndex}:tool-particles`
+  private toolParticleKey(sessionID: string, callID: string) {
+    return `${sessionID}\u0000${callID}`
   }
 
-  private startToolParticles(openCodeState: OpenCodeState, sessionID: string) {
-    const session = openCodeState.sessions.get(sessionID)
-    if (!session || session.activeTools.size > 0) return
+  private toolParticleDisturbanceID(sessionID: string, faceIndex: number, callID: string) {
+    return `session:${sessionID}:face:${faceIndex}:tool:${callID}:particles`
+  }
 
+  private startToolParticles(sessionID: string, callID: string) {
     const faceIndex = this.getSessionFace(sessionID)
     if (faceIndex === undefined) return
 
-    const id = this.toolParticleDisturbanceID(sessionID, faceIndex)
-    this.toolParticleDisturbanceIDs.set(sessionID, id)
+    const key = this.toolParticleKey(sessionID, callID)
+    const id = this.toolParticleDisturbanceID(sessionID, faceIndex, callID)
+    this.toolParticleDisturbances.set(key, { sessionID, callID, faceIndex, id })
     this.cube.addDisturbance(new ParticleEmitterDisturbance({ faceIndex, color: this.getFaceColor(faceIndex) }), id)
   }
 
-  private stopToolParticlesIfLastTool(openCodeState: OpenCodeState, sessionID: string, callID: string) {
-    const session = openCodeState.sessions.get(sessionID)
-    if (!session || !session.activeTools.has(callID) || session.activeTools.size > 1) return
+  private stopToolParticlesAfterDelay(sessionID: string, callID: string) {
+    const key = this.toolParticleKey(sessionID, callID)
+    const entry = this.toolParticleDisturbances.get(key)
+    if (!entry) return
 
-    const faceIndex = this.getSessionFace(sessionID)
-    if (faceIndex === undefined) return
-
-    const id = this.toolParticleDisturbanceIDs.get(sessionID) || this.toolParticleDisturbanceID(sessionID, faceIndex)
     const timer = setTimeout(() => {
-      this.stopToolParticles(sessionID, faceIndex, id)
+      this.stopToolParticles(entry)
     }, TOOL_PARTICLE_STOP_DELAY_MS)
     timer.unref?.()
   }
 
-  private stopToolParticles(sessionID: string, faceIndex: number, id = this.toolParticleDisturbanceIDs.get(sessionID) || this.toolParticleDisturbanceID(sessionID, faceIndex)) {
-    this.cube.markDisturbanceDone(id)
-    this.toolParticleDisturbanceIDs.delete(sessionID)
+  private stopToolParticles(entry: ToolParticleEntry) {
+    this.cube.markDisturbanceDone(entry.id)
+    this.toolParticleDisturbances.delete(this.toolParticleKey(entry.sessionID, entry.callID))
+  }
+
+  private stopToolParticlesForSession(sessionID: string) {
+    for (const entry of this.toolParticleDisturbances.values()) {
+      if (entry.sessionID === sessionID) this.stopToolParticles(entry)
+    }
   }
 
   private hasBusyOrRetrySession(openCodeState: OpenCodeState) {
