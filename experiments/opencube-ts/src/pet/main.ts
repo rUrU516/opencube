@@ -23,6 +23,7 @@ let panelWindow: any = null
 let tray: any = null
 let server: any = null
 let cubeTickTimer: ReturnType<typeof setInterval> | null = null
+let syncingDragWindow = false
 let events: Array<Record<string, unknown>> = []
 const openCodeState = new OpenCodeState()
 const cube = new Cube(
@@ -442,12 +443,26 @@ function createPetWindow() {
 
 function syncRenderWindowToDragWindow() {
   if (!petWindow || petWindow.isDestroyed() || !dragWindow || dragWindow.isDestroyed()) return
+  if (syncingDragWindow) return
   const [dragX, dragY] = dragWindow.getPosition()
-  petWindow.setPosition(
-    Math.round(dragX - (PET_RENDER_SIZE - PET_DRAG_SIZE) / 2),
-    Math.round(dragY - (PET_RENDER_SIZE - PET_DRAG_SIZE) / 2 - PET_DRAG_OFFSET_Y),
-    false,
-  )
+  const dragCenter = {
+    x: dragX + PET_DRAG_SIZE / 2,
+    y: dragY + PET_DRAG_SIZE / 2,
+  }
+  const workArea = electronScreen.getDisplayNearestPoint(dragCenter).workArea
+  const unclampedRenderX = Math.round(dragX - (PET_RENDER_SIZE - PET_DRAG_SIZE) / 2)
+  const unclampedRenderY = Math.round(dragY - (PET_RENDER_SIZE - PET_DRAG_SIZE) / 2 - PET_DRAG_OFFSET_Y)
+  const renderX = Math.max(workArea.x, Math.min(workArea.x + workArea.width - PET_RENDER_SIZE, unclampedRenderX))
+  const renderY = Math.max(workArea.y, Math.min(workArea.y + workArea.height - PET_RENDER_SIZE, unclampedRenderY))
+  petWindow.setPosition(renderX, renderY, false)
+
+  const clampedDragX = Math.round(renderX + (PET_RENDER_SIZE - PET_DRAG_SIZE) / 2)
+  const clampedDragY = Math.round(renderY + (PET_RENDER_SIZE - PET_DRAG_SIZE) / 2 + PET_DRAG_OFFSET_Y)
+  if (clampedDragX !== dragX || clampedDragY !== dragY) {
+    syncingDragWindow = true
+    dragWindow.setPosition(clampedDragX, clampedDragY, false)
+    syncingDragWindow = false
+  }
 }
 
 function createDragWindow() {
