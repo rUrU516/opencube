@@ -60,12 +60,14 @@ class ParticleEmitterDisturbance {
     rate;
     speed;
     color;
+    particleSizeAdd;
     accumulator;
     constructor(options) {
         this.faceIndex = options.faceIndex;
         this.rate = options.rate ?? 7;
         this.speed = options.speed ?? 4.2;
         this.color = options.color;
+        this.particleSizeAdd = options.particleSizeAdd ?? 0;
         this.accumulator = 0;
     }
     apply(state, dt) {
@@ -90,7 +92,7 @@ class ParticleEmitterDisturbance {
                 },
                 color: this.color,
                 alpha: 1,
-                size: randomBetween(0.16, 0.26),
+                size: randomBetween(0.16, 0.26) + this.particleSizeAdd,
             });
         }
     }

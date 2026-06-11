@@ -9,10 +9,26 @@ import type { OpenCodeEvent, OpenCodeState, SessionStatus } from "../opencode/st
 const BUSY_DAMPING_REDUCTION_ID = "global:busy-damping-reduction"
 const FACE_COUNT = 6
 const TOOL_PARTICLE_STOP_DELAY_MS = 2000
+const WAITING_INPUT_PARTICLE_RATE = 2.5
+const WAITING_INPUT_PARTICLE_SIZE_ADD = 0.5
 
 type ToolParticleEntry = {
   sessionID: string
   callID: string
+  faceIndex: number
+  id: string
+}
+
+type PermissionParticleEntry = {
+  sessionID: string
+  requestID: string
+  faceIndex: number
+  id: string
+}
+
+type QuestionParticleEntry = {
+  sessionID: string
+  requestID: string
   faceIndex: number
   id: string
 }
@@ -34,12 +50,16 @@ export class CubeEffectController {
   private faceColors: Array<Color | undefined>
   private sessionFaces: Map<string, number>
   private toolParticleDisturbances: Map<string, ToolParticleEntry>
+  private permissionParticleDisturbances: Map<string, PermissionParticleEntry>
+  private questionParticleDisturbances: Map<string, QuestionParticleEntry>
 
   constructor(private cube: Cube) {
     this.faceOwners = Array.from({ length: FACE_COUNT })
     this.faceColors = Array.from({ length: FACE_COUNT })
     this.sessionFaces = new Map()
     this.toolParticleDisturbances = new Map()
+    this.permissionParticleDisturbances = new Map()
+    this.questionParticleDisturbances = new Map()
   }
 
   sync(openCodeState: OpenCodeState, event: OpenCodeEvent) {
@@ -59,6 +79,8 @@ export class CubeEffectController {
       const faceIndex = this.releaseFace(event.sessionID)
       if (faceIndex !== undefined) {
         this.stopToolParticlesForSession(event.sessionID)
+        this.stopPermissionParticlesForSession(event.sessionID)
+        this.stopQuestionParticlesForSession(event.sessionID)
         this.cube.addDisturbance(new FaceDimDisturbance({ faceIndex, brightness: 0 }))
       }
 
@@ -75,6 +97,26 @@ export class CubeEffectController {
 
     if (event.type === "tool.finish") {
       this.stopToolParticlesAfterDelay(event.sessionID, event.callID)
+      return
+    }
+
+    if (event.type === "permission.ask") {
+      this.startPermissionParticles(event.sessionID, event.requestID)
+      return
+    }
+
+    if (event.type === "permission.reply") {
+      this.stopPermissionParticles(event.sessionID)
+      return
+    }
+
+    if (event.type === "question.ask") {
+      this.startQuestionParticles(event.sessionID, event.requestID)
+      return
+    }
+
+    if (event.type === "question.reply" || event.type === "question.reject") {
+      this.stopQuestionParticles(event.sessionID)
       return
     }
   }
@@ -169,6 +211,64 @@ export class CubeEffectController {
     for (const entry of this.toolParticleDisturbances.values()) {
       if (entry.sessionID === sessionID) this.stopToolParticles(entry)
     }
+  }
+
+  private permissionParticleDisturbanceID(sessionID: string, faceIndex: number, requestID: string) {
+    return `session:${sessionID}:face:${faceIndex}:permission:${requestID}:particles`
+  }
+
+  private startPermissionParticles(sessionID: string, requestID: string) {
+    const faceIndex = this.getSessionFace(sessionID)
+    if (faceIndex === undefined) return
+
+    this.stopPermissionParticles(sessionID)
+    const id = this.permissionParticleDisturbanceID(sessionID, faceIndex, requestID)
+    this.permissionParticleDisturbances.set(sessionID, { sessionID, requestID, faceIndex, id })
+    this.cube.addDisturbance(
+      new ParticleEmitterDisturbance({ faceIndex, color: this.getFaceColor(faceIndex), rate: WAITING_INPUT_PARTICLE_RATE, particleSizeAdd: WAITING_INPUT_PARTICLE_SIZE_ADD }),
+      id,
+    )
+  }
+
+  private stopPermissionParticles(sessionID: string) {
+    const entry = this.permissionParticleDisturbances.get(sessionID)
+    if (!entry) return
+
+    this.cube.markDisturbanceDone(entry.id)
+    this.permissionParticleDisturbances.delete(sessionID)
+  }
+
+  private stopPermissionParticlesForSession(sessionID: string) {
+    this.stopPermissionParticles(sessionID)
+  }
+
+  private questionParticleDisturbanceID(sessionID: string, faceIndex: number, requestID: string) {
+    return `session:${sessionID}:face:${faceIndex}:question:${requestID}:particles`
+  }
+
+  private startQuestionParticles(sessionID: string, requestID: string) {
+    const faceIndex = this.getSessionFace(sessionID)
+    if (faceIndex === undefined) return
+
+    this.stopQuestionParticles(sessionID)
+    const id = this.questionParticleDisturbanceID(sessionID, faceIndex, requestID)
+    this.questionParticleDisturbances.set(sessionID, { sessionID, requestID, faceIndex, id })
+    this.cube.addDisturbance(
+      new ParticleEmitterDisturbance({ faceIndex, color: this.getFaceColor(faceIndex), rate: WAITING_INPUT_PARTICLE_RATE, particleSizeAdd: WAITING_INPUT_PARTICLE_SIZE_ADD }),
+      id,
+    )
+  }
+
+  private stopQuestionParticles(sessionID: string) {
+    const entry = this.questionParticleDisturbances.get(sessionID)
+    if (!entry) return
+
+    this.cube.markDisturbanceDone(entry.id)
+    this.questionParticleDisturbances.delete(sessionID)
+  }
+
+  private stopQuestionParticlesForSession(sessionID: string) {
+    this.stopQuestionParticles(sessionID)
   }
 
   private hasBusyOrRetrySession(openCodeState: OpenCodeState) {

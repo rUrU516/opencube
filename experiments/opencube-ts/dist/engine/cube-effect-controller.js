@@ -8,6 +8,8 @@ const particle_emitter_1 = require("../cube/disturbances/particle-emitter");
 const BUSY_DAMPING_REDUCTION_ID = "global:busy-damping-reduction";
 const FACE_COUNT = 6;
 const TOOL_PARTICLE_STOP_DELAY_MS = 2000;
+const WAITING_INPUT_PARTICLE_RATE = 2.5;
+const WAITING_INPUT_PARTICLE_SIZE_ADD = 0.5;
 function randomBetween(min, max) {
     return min + Math.random() * (max - min);
 }
@@ -24,12 +26,16 @@ class CubeEffectController {
     faceColors;
     sessionFaces;
     toolParticleDisturbances;
+    permissionParticleDisturbances;
+    questionParticleDisturbances;
     constructor(cube) {
         this.cube = cube;
         this.faceOwners = Array.from({ length: FACE_COUNT });
         this.faceColors = Array.from({ length: FACE_COUNT });
         this.sessionFaces = new Map();
         this.toolParticleDisturbances = new Map();
+        this.permissionParticleDisturbances = new Map();
+        this.questionParticleDisturbances = new Map();
     }
     sync(openCodeState, event) {
         const previousStatus = this.getSessionStatus(openCodeState, event.sessionID);
@@ -46,6 +52,8 @@ class CubeEffectController {
             const faceIndex = this.releaseFace(event.sessionID);
             if (faceIndex !== undefined) {
                 this.stopToolParticlesForSession(event.sessionID);
+                this.stopPermissionParticlesForSession(event.sessionID);
+                this.stopQuestionParticlesForSession(event.sessionID);
                 this.cube.addDisturbance(new face_dim_1.FaceDimDisturbance({ faceIndex, brightness: 0 }));
             }
             if (!this.hasOtherBusyOrRetrySession(openCodeState, event.sessionID)) {
@@ -59,6 +67,22 @@ class CubeEffectController {
         }
         if (event.type === "tool.finish") {
             this.stopToolParticlesAfterDelay(event.sessionID, event.callID);
+            return;
+        }
+        if (event.type === "permission.ask") {
+            this.startPermissionParticles(event.sessionID, event.requestID);
+            return;
+        }
+        if (event.type === "permission.reply") {
+            this.stopPermissionParticles(event.sessionID);
+            return;
+        }
+        if (event.type === "question.ask") {
+            this.startQuestionParticles(event.sessionID, event.requestID);
+            return;
+        }
+        if (event.type === "question.reply" || event.type === "question.reject") {
+            this.stopQuestionParticles(event.sessionID);
             return;
         }
     }
@@ -143,6 +167,50 @@ class CubeEffectController {
             if (entry.sessionID === sessionID)
                 this.stopToolParticles(entry);
         }
+    }
+    permissionParticleDisturbanceID(sessionID, faceIndex, requestID) {
+        return `session:${sessionID}:face:${faceIndex}:permission:${requestID}:particles`;
+    }
+    startPermissionParticles(sessionID, requestID) {
+        const faceIndex = this.getSessionFace(sessionID);
+        if (faceIndex === undefined)
+            return;
+        this.stopPermissionParticles(sessionID);
+        const id = this.permissionParticleDisturbanceID(sessionID, faceIndex, requestID);
+        this.permissionParticleDisturbances.set(sessionID, { sessionID, requestID, faceIndex, id });
+        this.cube.addDisturbance(new particle_emitter_1.ParticleEmitterDisturbance({ faceIndex, color: this.getFaceColor(faceIndex), rate: WAITING_INPUT_PARTICLE_RATE, particleSizeAdd: WAITING_INPUT_PARTICLE_SIZE_ADD }), id);
+    }
+    stopPermissionParticles(sessionID) {
+        const entry = this.permissionParticleDisturbances.get(sessionID);
+        if (!entry)
+            return;
+        this.cube.markDisturbanceDone(entry.id);
+        this.permissionParticleDisturbances.delete(sessionID);
+    }
+    stopPermissionParticlesForSession(sessionID) {
+        this.stopPermissionParticles(sessionID);
+    }
+    questionParticleDisturbanceID(sessionID, faceIndex, requestID) {
+        return `session:${sessionID}:face:${faceIndex}:question:${requestID}:particles`;
+    }
+    startQuestionParticles(sessionID, requestID) {
+        const faceIndex = this.getSessionFace(sessionID);
+        if (faceIndex === undefined)
+            return;
+        this.stopQuestionParticles(sessionID);
+        const id = this.questionParticleDisturbanceID(sessionID, faceIndex, requestID);
+        this.questionParticleDisturbances.set(sessionID, { sessionID, requestID, faceIndex, id });
+        this.cube.addDisturbance(new particle_emitter_1.ParticleEmitterDisturbance({ faceIndex, color: this.getFaceColor(faceIndex), rate: WAITING_INPUT_PARTICLE_RATE, particleSizeAdd: WAITING_INPUT_PARTICLE_SIZE_ADD }), id);
+    }
+    stopQuestionParticles(sessionID) {
+        const entry = this.questionParticleDisturbances.get(sessionID);
+        if (!entry)
+            return;
+        this.cube.markDisturbanceDone(entry.id);
+        this.questionParticleDisturbances.delete(sessionID);
+    }
+    stopQuestionParticlesForSession(sessionID) {
+        this.stopQuestionParticles(sessionID);
     }
     hasBusyOrRetrySession(openCodeState) {
         for (const session of openCodeState.sessions.values()) {

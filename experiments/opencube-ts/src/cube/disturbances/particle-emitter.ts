@@ -70,13 +70,15 @@ export class ParticleEmitterDisturbance implements Disturbance {
   rate: number
   speed: number
   color: Color
+  particleSizeAdd: number
   accumulator: number
 
-  constructor(options: { faceIndex: number; color: Color; rate?: number; speed?: number }) {
+  constructor(options: { faceIndex: number; color: Color; rate?: number; speed?: number; particleSizeAdd?: number }) {
     this.faceIndex = options.faceIndex
     this.rate = options.rate ?? 7
     this.speed = options.speed ?? 4.2
     this.color = options.color
+    this.particleSizeAdd = options.particleSizeAdd ?? 0
     this.accumulator = 0
   }
 
@@ -103,7 +105,7 @@ export class ParticleEmitterDisturbance implements Disturbance {
         },
         color: this.color,
         alpha: 1,
-        size: randomBetween(0.16, 0.26),
+        size: randomBetween(0.16, 0.26) + this.particleSizeAdd,
       })
     }
   }
