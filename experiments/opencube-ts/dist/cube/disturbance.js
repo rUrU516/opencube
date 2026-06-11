@@ -17,7 +17,7 @@ class DisturbancePool {
                 }),
             },
             { id: "global:base-damping", disturbance: new angular_damping_1.AngularDampingDisturbance(2.0) },
-            { id: "global:particle-fade", disturbance: new particle_fade_1.ParticleFadeDisturbance({ fadeStartDistance: 0.55, maxDistance: 1.55 }) },
+            { id: "global:particle-fade", disturbance: new particle_fade_1.ParticleFadeDisturbance({ fadeStartDistance: 0.7, maxDistance: 2.6 }) },
             { id: "test:face-0-particle-emitter", disturbance: new particle_emitter_1.ParticleEmitterDisturbance({ faceIndex: 0 }) },
             ...disturbances.map((disturbance) => ({ disturbance })),
         ];

@@ -304,8 +304,8 @@ function petHtml() {
             continue
           }
           sprite.visible = true
-          sprite.position.set(particle.position.x, particle.position.y, particle.position.z)
-          sprite.scale.setScalar(particle.size || 0.12)
+          sprite.position.set(particle.position.x * cubeScale, particle.position.y * cubeScale, particle.position.z * cubeScale)
+          sprite.scale.setScalar((particle.size || 0.12) * cubeScale)
           sprite.material.color.setRGB((particle.color.r || 255) / 255, (particle.color.g || 255) / 255, (particle.color.b || 255) / 255)
           sprite.material.opacity = Math.max(0, Math.min(1, particle.alpha ?? 1))
         }

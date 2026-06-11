@@ -69,7 +69,7 @@ class ParticleEmitterDisturbance {
     accumulator;
     constructor(options) {
         this.faceIndex = options.faceIndex;
-        this.rate = options.rate ?? 14;
+        this.rate = options.rate ?? 7;
         this.speed = options.speed ?? 1.85;
         this.accumulator = 0;
     }
