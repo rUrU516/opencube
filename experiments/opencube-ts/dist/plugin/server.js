@@ -10,6 +10,23 @@ function handled() {
 function delay(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
 }
+function textOfArguments(args) {
+    if (typeof args === "string")
+        return args.trim().toLowerCase();
+    if (Array.isArray(args))
+        return args.join(" ").trim().toLowerCase();
+    if (args == null)
+        return "";
+    return String(args).trim().toLowerCase();
+}
+function parseDragBorderVisibility(args) {
+    const raw = textOfArguments(args);
+    if (/\b(show|on|visible|true|1)\b/.test(raw))
+        return true;
+    if (/\b(hide|off|hidden|false|0)\b/.test(raw))
+        return false;
+    return undefined;
+}
 async function injectNotice(client, sessionID, text) {
     if (!sessionID || !client?.session?.prompt)
         return;
@@ -28,7 +45,7 @@ async function injectNotice(client, sessionID, text) {
 }
 exports.id = "opencube-ts-test";
 async function server({ client }) {
-    const handledCommands = new Set(["opencube-ts-test", "opencube-ts-pet", "opencube-ts-stop", "opencube-ts-restart", "opencube-ts-hello"]);
+    const handledCommands = new Set(["opencube-ts-test", "opencube-ts-pet", "opencube-ts-stop", "opencube-ts-restart", "opencube-ts-hello", "opencube-ts-drag-border"]);
     return {
         config: async (cfg) => {
             cfg.command ??= {};
@@ -51,6 +68,10 @@ async function server({ client }) {
             cfg.command["opencube-ts-hello"] = {
                 template: "/opencube-ts-hello",
                 description: "Send a hello event to OpenCube from the TypeScript experiment plugin.",
+            };
+            cfg.command["opencube-ts-drag-border"] = {
+                template: "/opencube-ts-drag-border",
+                description: "Show/hide/toggle the OpenCube TS drag handle border, e.g. /opencube-ts-drag-border hide.",
             };
         },
         "command.execute.before": async (input) => {
@@ -79,6 +100,11 @@ async function server({ client }) {
                     sessionID: input.sessionID,
                 });
                 await injectNotice(client, input.sessionID, result ? "✦ OpenCube TS experiment sent hello." : "☾ OpenCube is sleeping. Start it with /opencube-ts-pet first.");
+            }
+            if (input.command === "opencube-ts-drag-border") {
+                const visible = parseDragBorderVisibility(input.arguments);
+                const result = await (0, electron_bridge_1.setDragBorder)(visible);
+                await injectNotice(client, input.sessionID, result ? `▣ OpenCube TS drag border ${result.visible ? "shown" : "hidden"}.` : "☾ OpenCube is sleeping. Start it with /opencube-ts-pet first.");
             }
             handled();
         },

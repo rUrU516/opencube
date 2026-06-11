@@ -24,6 +24,7 @@ let panelWindow = null;
 let tray = null;
 let server = null;
 let cubeTickTimer = null;
+let dragBorderVisible = true;
 let events = [];
 const openCodeState = new state_1.OpenCodeState();
 const cube = new cube_1.Cube(new state_2.CubeState({
@@ -366,6 +367,7 @@ function escapeHtml(value) {
         .replaceAll("'", "&#39;");
 }
 function dragTestHtml() {
+    const border = dragBorderVisible ? "2px solid rgba(130, 245, 255, 0.58)" : "2px solid transparent";
     return `<!doctype html>
 <html>
   <head>
@@ -377,7 +379,7 @@ function dragTestHtml() {
         width: 100%;
         height: 100%;
         background: transparent;
-        border: 2px solid rgba(130, 245, 255, 0.58);
+        border: ${border};
         border-radius: 18px;
         user-select: none;
         -webkit-app-region: drag;
@@ -386,6 +388,16 @@ function dragTestHtml() {
   </head>
   <body><div class="drag-test" aria-label="OpenCube TS drag handle"></div></body>
 </html>`;
+}
+function updateDragBorder() {
+    if (!dragWindow || dragWindow.isDestroyed())
+        return;
+    dragWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(dragTestHtml())}`);
+}
+function setDragBorderVisible(visible) {
+    dragBorderVisible = typeof visible === "boolean" ? visible : !dragBorderVisible;
+    updateDragBorder();
+    return dragBorderVisible;
 }
 function panelHtml() {
     const state = openCodeStateSnapshot();
@@ -626,6 +638,12 @@ function startServer() {
             if (req.method === "POST" && url.pathname === "/show") {
                 showPet();
                 return json(res, 200, { ok: true });
+            }
+            if (req.method === "POST" && url.pathname === "/drag-border") {
+                const body = await readRequestJson(req);
+                const visible = typeof body?.visible === "boolean" ? body.visible : undefined;
+                const nextVisible = setDragBorderVisible(visible);
+                return json(res, 200, { ok: true, visible: nextVisible });
             }
             if (req.method === "POST" && url.pathname === "/event") {
                 const body = await readRequestJson(req);

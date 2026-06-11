@@ -77,3 +77,9 @@ export async function sendEvent(event: Record<string, unknown>) {
   if (!health) return undefined
   return await requestPet("/event", { method: "POST", body: event, timeoutMs: 1000 })
 }
+
+export async function setDragBorder(visible?: boolean) {
+  const health = await healthPet()
+  if (!health) return undefined
+  return await requestPet("/drag-border", { method: "POST", body: { visible }, timeoutMs: 1000 })
+}

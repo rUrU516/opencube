@@ -25,6 +25,7 @@ let panelWindow: any = null
 let tray: any = null
 let server: any = null
 let cubeTickTimer: ReturnType<typeof setInterval> | null = null
+let dragBorderVisible = true
 let events: Array<Record<string, unknown>> = []
 const openCodeState = new OpenCodeState()
 const cube = new Cube(
@@ -373,6 +374,7 @@ function escapeHtml(value: unknown) {
 }
 
 function dragTestHtml() {
+  const border = dragBorderVisible ? "2px solid rgba(130, 245, 255, 0.58)" : "2px solid transparent"
   return `<!doctype html>
 <html>
   <head>
@@ -384,7 +386,7 @@ function dragTestHtml() {
         width: 100%;
         height: 100%;
         background: transparent;
-        border: 2px solid rgba(130, 245, 255, 0.58);
+        border: ${border};
         border-radius: 18px;
         user-select: none;
         -webkit-app-region: drag;
@@ -393,6 +395,17 @@ function dragTestHtml() {
   </head>
   <body><div class="drag-test" aria-label="OpenCube TS drag handle"></div></body>
 </html>`
+}
+
+function updateDragBorder() {
+  if (!dragWindow || dragWindow.isDestroyed()) return
+  dragWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(dragTestHtml())}`)
+}
+
+function setDragBorderVisible(visible?: boolean) {
+  dragBorderVisible = typeof visible === "boolean" ? visible : !dragBorderVisible
+  updateDragBorder()
+  return dragBorderVisible
 }
 
 function panelHtml() {
@@ -641,6 +654,12 @@ function startServer() {
       if (req.method === "POST" && url.pathname === "/show") {
         showPet()
         return json(res, 200, { ok: true })
+      }
+      if (req.method === "POST" && url.pathname === "/drag-border") {
+        const body = await readRequestJson(req)
+        const visible = typeof body?.visible === "boolean" ? body.visible : undefined
+        const nextVisible = setDragBorderVisible(visible)
+        return json(res, 200, { ok: true, visible: nextVisible })
       }
       if (req.method === "POST" && url.pathname === "/event") {
         const body = await readRequestJson(req)

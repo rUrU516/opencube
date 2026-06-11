@@ -4,6 +4,7 @@ exports.healthPet = healthPet;
 exports.showPet = showPet;
 exports.quitPet = quitPet;
 exports.sendEvent = sendEvent;
+exports.setDragBorder = setDragBorder;
 const { spawn } = require("node:child_process");
 const path = require("node:path");
 const PET_HOST = "127.0.0.1";
@@ -79,4 +80,10 @@ async function sendEvent(event) {
     if (!health)
         return undefined;
     return await requestPet("/event", { method: "POST", body: event, timeoutMs: 1000 });
+}
+async function setDragBorder(visible) {
+    const health = await healthPet();
+    if (!health)
+        return undefined;
+    return await requestPet("/drag-border", { method: "POST", body: { visible }, timeoutMs: 1000 });
 }
