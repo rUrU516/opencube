@@ -169,6 +169,12 @@ function petHtml() {
 
       const petRoot = new THREE.Group()
       scene.add(petRoot)
+      const petRootTarget = new THREE.Vector3()
+      const petRootVelocity = new THREE.Vector3()
+      const petRootAcceleration = new THREE.Vector3()
+      const petRootDisplacement = new THREE.Vector3()
+      let hasPetRootTarget = false
+      let lastFrameAt = performance.now()
       const cubeGroup = new THREE.Group()
       const baseCubeScale = ${PET_CUBE_SIZE / PET_RENDER_SIZE}
       let viewScale = baseCubeScale
@@ -330,7 +336,12 @@ function petHtml() {
 
       function applyPetAnchor(anchor) {
         const world = screenPointToWorld(anchor?.x ?? window.innerWidth / 2, anchor?.y ?? window.innerHeight / 2)
-        petRoot.position.set(world.x, world.y, 0)
+        petRootTarget.set(world.x, world.y, 0)
+        if (!hasPetRootTarget) {
+          petRoot.position.copy(petRootTarget)
+          petRootVelocity.set(0, 0, 0)
+          hasPetRootTarget = true
+        }
       }
 
       window.addEventListener("resize", () => {
@@ -346,6 +357,22 @@ function petHtml() {
       })
 
       function tick() {
+        const now = performance.now()
+        const dt = Math.min(0.064, (now - lastFrameAt) / 1000)
+        lastFrameAt = now
+        if (hasPetRootTarget) {
+          const spring = 90
+          const friction = 15
+          petRootDisplacement.copy(petRootTarget).sub(petRoot.position)
+          petRootAcceleration.copy(petRootDisplacement).multiplyScalar(spring).addScaledVector(petRootVelocity, -friction)
+          petRootVelocity.addScaledVector(petRootAcceleration, dt)
+          petRoot.position.addScaledVector(petRootVelocity, dt)
+
+          if (petRootDisplacement.lengthSq() < 0.000001 && petRootVelocity.lengthSq() < 0.000001) {
+            petRoot.position.copy(petRootTarget)
+            petRootVelocity.set(0, 0, 0)
+          }
+        }
         renderer.render(scene, camera)
         requestAnimationFrame(tick)
       }
