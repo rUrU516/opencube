@@ -6,6 +6,10 @@ function handled(): never {
   throw new Error(COMMAND_HANDLED_SENTINEL)
 }
 
+function delay(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
 async function injectNotice(client: any, sessionID: string | undefined, text: string) {
   if (!sessionID || !client?.session?.prompt) return
 
@@ -25,7 +29,7 @@ async function injectNotice(client: any, sessionID: string | undefined, text: st
 export const id = "opencube-ts-test"
 
 export async function server({ client }: { client: any }) {
-  const handledCommands = new Set(["opencube-ts-test", "opencube-ts-pet", "opencube-ts-stop", "opencube-ts-hello"])
+  const handledCommands = new Set(["opencube-ts-test", "opencube-ts-pet", "opencube-ts-stop", "opencube-ts-restart", "opencube-ts-hello"])
 
   return {
     config: async (cfg: any) => {
@@ -41,6 +45,10 @@ export async function server({ client }: { client: any }) {
       cfg.command["opencube-ts-stop"] = {
         template: "/opencube-ts-stop",
         description: "Quit the desktop OpenCube pet from the TypeScript experiment plugin.",
+      }
+      cfg.command["opencube-ts-restart"] = {
+        template: "/opencube-ts-restart",
+        description: "Restart the desktop OpenCube pet from the TypeScript experiment plugin.",
       }
       cfg.command["opencube-ts-hello"] = {
         template: "/opencube-ts-hello",
@@ -63,6 +71,13 @@ export async function server({ client }: { client: any }) {
       if (input.command === "opencube-ts-stop") {
         const stopped = await quitPet()
         await injectNotice(client, input.sessionID, stopped ? "◌ OpenCube TS experiment stopped the pet." : "◌ OpenCube pet was not running.")
+      }
+
+      if (input.command === "opencube-ts-restart") {
+        await quitPet()
+        await delay(300)
+        const health = await showPet()
+        await injectNotice(client, input.sessionID, health ? "↻ OpenCube TS experiment restarted the pet." : "↻ OpenCube TS experiment restarted the pet; it may still be warming up.")
       }
 
       if (input.command === "opencube-ts-hello") {

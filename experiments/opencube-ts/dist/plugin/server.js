@@ -7,6 +7,9 @@ const COMMAND_HANDLED_SENTINEL = "__OPENCUBE_TS_TEST_COMMAND_HANDLED__";
 function handled() {
     throw new Error(COMMAND_HANDLED_SENTINEL);
 }
+function delay(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
 async function injectNotice(client, sessionID, text) {
     if (!sessionID || !client?.session?.prompt)
         return;
@@ -25,7 +28,7 @@ async function injectNotice(client, sessionID, text) {
 }
 exports.id = "opencube-ts-test";
 async function server({ client }) {
-    const handledCommands = new Set(["opencube-ts-test", "opencube-ts-pet", "opencube-ts-stop", "opencube-ts-hello"]);
+    const handledCommands = new Set(["opencube-ts-test", "opencube-ts-pet", "opencube-ts-stop", "opencube-ts-restart", "opencube-ts-hello"]);
     return {
         config: async (cfg) => {
             cfg.command ??= {};
@@ -40,6 +43,10 @@ async function server({ client }) {
             cfg.command["opencube-ts-stop"] = {
                 template: "/opencube-ts-stop",
                 description: "Quit the desktop OpenCube pet from the TypeScript experiment plugin.",
+            };
+            cfg.command["opencube-ts-restart"] = {
+                template: "/opencube-ts-restart",
+                description: "Restart the desktop OpenCube pet from the TypeScript experiment plugin.",
             };
             cfg.command["opencube-ts-hello"] = {
                 template: "/opencube-ts-hello",
@@ -59,6 +66,12 @@ async function server({ client }) {
             if (input.command === "opencube-ts-stop") {
                 const stopped = await (0, electron_bridge_1.quitPet)();
                 await injectNotice(client, input.sessionID, stopped ? "◌ OpenCube TS experiment stopped the pet." : "◌ OpenCube pet was not running.");
+            }
+            if (input.command === "opencube-ts-restart") {
+                await (0, electron_bridge_1.quitPet)();
+                await delay(300);
+                const health = await (0, electron_bridge_1.showPet)();
+                await injectNotice(client, input.sessionID, health ? "↻ OpenCube TS experiment restarted the pet." : "↻ OpenCube TS experiment restarted the pet; it may still be warming up.");
             }
             if (input.command === "opencube-ts-hello") {
                 const result = await (0, electron_bridge_1.sendEvent)({

@@ -13,8 +13,11 @@ const HOST = "127.0.0.1";
 const PORT = Number(process.env.OPENCODE_TS_PET_PORT || process.env.OPENCODE_PET_PORT || 47833);
 const ICON_PATH = path.resolve(__dirname, "../../../../assets/opencode-icon.png");
 const PET_CUBE_SIZE = 120;
+const PET_DRAG_SIZE = 60;
+const PET_DRAG_OFFSET_Y = 10;
 const PET_RENDER_SIZE = 520;
 let petWindow = null;
+let dragWindow = null;
 let panelWindow = null;
 let tray = null;
 let server = null;
@@ -326,6 +329,28 @@ function escapeHtml(value) {
         .replaceAll('"', "&quot;")
         .replaceAll("'", "&#39;");
 }
+function dragTestHtml() {
+    return `<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: transparent; }
+      .drag-test {
+        box-sizing: border-box;
+        width: 100%;
+        height: 100%;
+        background: transparent;
+        border: 2px solid rgba(130, 245, 255, 0.58);
+        border-radius: 18px;
+        user-select: none;
+        -webkit-app-region: drag;
+      }
+    </style>
+  </head>
+  <body><div class="drag-test" aria-label="OpenCube TS drag handle"></div></body>
+</html>`;
+}
 function panelHtml() {
     const state = openCodeStateSnapshot();
     const stateRows = state.sessions
@@ -400,8 +425,45 @@ function createPetWindow() {
     petWindow.setIgnoreMouseEvents(true, { forward: true });
     petWindow.on("closed", () => {
         petWindow = null;
+        if (dragWindow && !dragWindow.isDestroyed())
+            dragWindow.close();
+        dragWindow = null;
     });
     return petWindow;
+}
+function syncRenderWindowToDragWindow() {
+    if (!petWindow || petWindow.isDestroyed() || !dragWindow || dragWindow.isDestroyed())
+        return;
+    const [dragX, dragY] = dragWindow.getPosition();
+    petWindow.setPosition(Math.round(dragX - (PET_RENDER_SIZE - PET_DRAG_SIZE) / 2), Math.round(dragY - (PET_RENDER_SIZE - PET_DRAG_SIZE) / 2 - PET_DRAG_OFFSET_Y), false);
+}
+function createDragWindow() {
+    if (dragWindow && !dragWindow.isDestroyed())
+        return dragWindow;
+    const renderWindow = createPetWindow();
+    const [renderX, renderY] = renderWindow.getPosition();
+    dragWindow = new BrowserWindow({
+        width: PET_DRAG_SIZE,
+        height: PET_DRAG_SIZE,
+        x: Math.round(renderX + (PET_RENDER_SIZE - PET_DRAG_SIZE) / 2),
+        y: Math.round(renderY + (PET_RENDER_SIZE - PET_DRAG_SIZE) / 2 + PET_DRAG_OFFSET_Y),
+        show: false,
+        frame: false,
+        resizable: false,
+        transparent: true,
+        alwaysOnTop: true,
+        skipTaskbar: true,
+        hasShadow: false,
+        title: `${APP_NAME} Drag Test`,
+        icon: ICON_PATH,
+    });
+    dragWindow.setAlwaysOnTop(true, "floating");
+    dragWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(dragTestHtml())}`);
+    dragWindow.on("move", syncRenderWindowToDragWindow);
+    dragWindow.on("closed", () => {
+        dragWindow = null;
+    });
+    return dragWindow;
 }
 function sendCubeState() {
     if (!petWindow || petWindow.isDestroyed())
@@ -429,10 +491,14 @@ function stopCubeTicker() {
 }
 function showPet() {
     const win = createPetWindow();
+    const drag = createDragWindow();
     startCubeTicker();
     sendCubeState();
     win.show();
     win.moveTop();
+    drag.show();
+    syncRenderWindowToDragWindow();
+    drag.moveTop();
 }
 function createPanelWindow() {
     if (panelWindow && !panelWindow.isDestroyed())
