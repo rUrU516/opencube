@@ -81,7 +81,9 @@ async function server({ client }) {
                 await injectNotice(client, input.sessionID, "◈ OpenCube TS experiment plugin is alive.");
             }
             if (input.command === "opencube-ts-pet") {
-                const health = await (0, electron_bridge_1.showPet)();
+                const health = await (0, electron_bridge_1.showPet)({
+                    onProgress: (message) => injectNotice(client, input.sessionID, message),
+                });
                 await injectNotice(client, input.sessionID, health ? "◈ OpenCube TS experiment started the pet." : "◈ OpenCube TS experiment asked the pet to start; it may still be warming up.");
             }
             if (input.command === "opencube-ts-stop") {
@@ -91,7 +93,9 @@ async function server({ client }) {
             if (input.command === "opencube-ts-restart") {
                 await (0, electron_bridge_1.quitPet)();
                 await delay(300);
-                const health = await (0, electron_bridge_1.showPet)();
+                const health = await (0, electron_bridge_1.showPet)({
+                    onProgress: (message) => injectNotice(client, input.sessionID, message),
+                });
                 await injectNotice(client, input.sessionID, health ? "↻ OpenCube TS experiment restarted the pet." : "↻ OpenCube TS experiment restarted the pet; it may still be warming up.");
             }
             if (input.command === "opencube-ts-hello") {

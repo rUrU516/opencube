@@ -82,7 +82,9 @@ export async function server({ client }: { client: any }) {
       }
 
       if (input.command === "opencube-ts-pet") {
-        const health = await showPet()
+        const health = await showPet({
+          onProgress: (message) => injectNotice(client, input.sessionID, message),
+        })
         await injectNotice(client, input.sessionID, health ? "◈ OpenCube TS experiment started the pet." : "◈ OpenCube TS experiment asked the pet to start; it may still be warming up.")
       }
 
@@ -94,7 +96,9 @@ export async function server({ client }: { client: any }) {
       if (input.command === "opencube-ts-restart") {
         await quitPet()
         await delay(300)
-        const health = await showPet()
+        const health = await showPet({
+          onProgress: (message) => injectNotice(client, input.sessionID, message),
+        })
         await injectNotice(client, input.sessionID, health ? "↻ OpenCube TS experiment restarted the pet." : "↻ OpenCube TS experiment restarted the pet; it may still be warming up.")
       }
 
