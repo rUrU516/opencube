@@ -15,6 +15,8 @@ const ICON_PATH = path.resolve(__dirname, "../../../../assets/opencode-icon.png"
 const PET_CUBE_SIZE = 120
 const PET_DRAG_SIZE = 60
 const PET_DRAG_OFFSET_Y = 10
+const PET_VISUAL_OFFSET_X = 4
+const PET_VISUAL_OFFSET_Y = -6
 const PET_RENDER_SIZE = 520
 
 let petWindow: any = null
@@ -23,7 +25,6 @@ let panelWindow: any = null
 let tray: any = null
 let server: any = null
 let cubeTickTimer: ReturnType<typeof setInterval> | null = null
-let syncingDragWindow = false
 let events: Array<Record<string, unknown>> = []
 const openCodeState = new OpenCodeState()
 const cube = new Cube(
@@ -153,7 +154,7 @@ function petHtml() {
         background: transparent;
         user-select: none;
       }
-      #scene { position: absolute; inset: 0; width: ${PET_RENDER_SIZE}px; height: ${PET_RENDER_SIZE}px; pointer-events: none; }
+      #scene { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
     </style>
   </head>
   <body>
@@ -169,12 +170,13 @@ function petHtml() {
       renderer.setClearColor(0x000000, 0)
       renderer.setPixelRatio(Math.min((window.devicePixelRatio || 1) * 1.5, 3))
       renderer.outputColorSpace = THREE.SRGBColorSpace
-      renderer.setSize(${PET_RENDER_SIZE}, ${PET_RENDER_SIZE}, false)
 
+      const petRoot = new THREE.Group()
+      scene.add(petRoot)
       const cubeGroup = new THREE.Group()
-      const cubeScale = ${PET_CUBE_SIZE / PET_RENDER_SIZE}
-      cubeGroup.scale.setScalar(cubeScale)
-      scene.add(cubeGroup)
+      const baseCubeScale = ${PET_CUBE_SIZE / PET_RENDER_SIZE}
+      let viewScale = baseCubeScale
+      petRoot.add(cubeGroup)
       const faceGeometry = new THREE.PlaneGeometry(0.60, 0.60)
       const glowGeometry = new THREE.PlaneGeometry(1.18, 1.18)
       const iconTexture = new THREE.TextureLoader().load("${iconUrl}")
@@ -292,7 +294,7 @@ function petHtml() {
             depthWrite: false,
           })
           const sprite = new THREE.Sprite(material)
-          scene.add(sprite)
+          petRoot.add(sprite)
           particleSprites.push(sprite)
         }
 
@@ -305,15 +307,46 @@ function petHtml() {
             continue
           }
           sprite.visible = true
-          sprite.position.set(particle.position.x * cubeScale, particle.position.y * cubeScale, particle.position.z * cubeScale)
-          sprite.scale.setScalar((particle.size || 0.12) * cubeScale)
+          sprite.position.set(particle.position.x * viewScale, particle.position.y * viewScale, particle.position.z * viewScale)
+          sprite.scale.setScalar((particle.size || 0.12) * viewScale)
           sprite.material.color.setRGB((particle.color.r || 255) / 255, (particle.color.g || 255) / 255, (particle.color.b || 255) / 255)
           sprite.material.opacity = Math.max(0, Math.min(1, particle.alpha ?? 1))
         }
       }
 
+      function updateViewport() {
+        renderer.setSize(window.innerWidth, window.innerHeight, false)
+        camera.aspect = window.innerWidth / Math.max(1, window.innerHeight)
+        camera.updateProjectionMatrix()
+        viewScale = baseCubeScale * (${PET_RENDER_SIZE} / Math.max(1, window.innerHeight))
+        cubeGroup.scale.setScalar(viewScale)
+      }
+
+      function screenPointToWorld(localX, localY) {
+        const distance = camera.position.z
+        const viewportHeight = 2 * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) * distance
+        const viewportWidth = viewportHeight * camera.aspect
+        return {
+          x: (localX / Math.max(1, window.innerWidth) - 0.5) * viewportWidth,
+          y: -(localY / Math.max(1, window.innerHeight) - 0.5) * viewportHeight,
+        }
+      }
+
+      function applyPetAnchor(anchor) {
+        const world = screenPointToWorld(anchor?.x ?? window.innerWidth / 2, anchor?.y ?? window.innerHeight / 2)
+        petRoot.position.set(world.x, world.y, 0)
+      }
+
+      window.addEventListener("resize", () => {
+        updateViewport()
+      })
+
       ipcRenderer.on("cube-state", (_event, state) => {
         applyCubeState(state)
+      })
+
+      ipcRenderer.on("pet-anchor", (_event, anchor) => {
+        applyPetAnchor(anchor)
       })
 
       function tick() {
@@ -322,6 +355,8 @@ function petHtml() {
       }
 
       applyCubeState({ rotation: { x: -14, y: -28, z: 0 } })
+      updateViewport()
+      applyPetAnchor({ x: window.innerWidth / 2, y: window.innerHeight / 2 })
       requestAnimationFrame(tick)
     </script>
   </body>
@@ -413,9 +448,12 @@ function panelHtml() {
 
 function createPetWindow() {
   if (petWindow && !petWindow.isDestroyed()) return petWindow
+  const display = electronScreen.getPrimaryDisplay().workArea
   petWindow = new BrowserWindow({
-    width: PET_RENDER_SIZE,
-    height: PET_RENDER_SIZE,
+    x: display.x,
+    y: display.y,
+    width: display.width,
+    height: display.height,
     show: false,
     frame: false,
     resizable: false,
@@ -433,6 +471,7 @@ function createPetWindow() {
   petWindow.setAlwaysOnTop(true, "floating")
   petWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(petHtml())}`)
   petWindow.setIgnoreMouseEvents(true, { forward: true })
+  petWindow.webContents.once("did-finish-load", () => sendPetAnchor())
   petWindow.on("closed", () => {
     petWindow = null
     if (dragWindow && !dragWindow.isDestroyed()) dragWindow.close()
@@ -441,39 +480,30 @@ function createPetWindow() {
   return petWindow
 }
 
-function syncRenderWindowToDragWindow() {
+function sendPetAnchor() {
   if (!petWindow || petWindow.isDestroyed() || !dragWindow || dragWindow.isDestroyed()) return
-  if (syncingDragWindow) return
   const [dragX, dragY] = dragWindow.getPosition()
-  const dragCenter = {
-    x: dragX + PET_DRAG_SIZE / 2,
-    y: dragY + PET_DRAG_SIZE / 2,
-  }
-  const workArea = electronScreen.getDisplayNearestPoint(dragCenter).workArea
-  const unclampedRenderX = Math.round(dragX - (PET_RENDER_SIZE - PET_DRAG_SIZE) / 2)
-  const unclampedRenderY = Math.round(dragY - (PET_RENDER_SIZE - PET_DRAG_SIZE) / 2 - PET_DRAG_OFFSET_Y)
-  const renderX = Math.max(workArea.x, Math.min(workArea.x + workArea.width - PET_RENDER_SIZE, unclampedRenderX))
-  const renderY = Math.max(workArea.y, Math.min(workArea.y + workArea.height - PET_RENDER_SIZE, unclampedRenderY))
-  petWindow.setPosition(renderX, renderY, false)
+  const [renderX, renderY] = petWindow.getPosition()
+  petWindow.webContents.send("pet-anchor", {
+    x: dragX + PET_DRAG_SIZE / 2 - renderX + PET_VISUAL_OFFSET_X,
+    y: dragY + PET_DRAG_SIZE / 2 - renderY - PET_DRAG_OFFSET_Y + PET_VISUAL_OFFSET_Y,
+  })
+}
 
-  const clampedDragX = Math.round(renderX + (PET_RENDER_SIZE - PET_DRAG_SIZE) / 2)
-  const clampedDragY = Math.round(renderY + (PET_RENDER_SIZE - PET_DRAG_SIZE) / 2 + PET_DRAG_OFFSET_Y)
-  if (clampedDragX !== dragX || clampedDragY !== dragY) {
-    syncingDragWindow = true
-    dragWindow.setPosition(clampedDragX, clampedDragY, false)
-    syncingDragWindow = false
-  }
+function syncRenderWindowToDragWindow() {
+  sendPetAnchor()
 }
 
 function createDragWindow() {
   if (dragWindow && !dragWindow.isDestroyed()) return dragWindow
   const renderWindow = createPetWindow()
   const [renderX, renderY] = renderWindow.getPosition()
+  const [renderWidth, renderHeight] = renderWindow.getSize()
   dragWindow = new BrowserWindow({
     width: PET_DRAG_SIZE,
     height: PET_DRAG_SIZE,
-    x: Math.round(renderX + (PET_RENDER_SIZE - PET_DRAG_SIZE) / 2),
-    y: Math.round(renderY + (PET_RENDER_SIZE - PET_DRAG_SIZE) / 2 + PET_DRAG_OFFSET_Y),
+    x: Math.round(renderX + (renderWidth - PET_DRAG_SIZE) / 2),
+    y: Math.round(renderY + (renderHeight - PET_DRAG_SIZE) / 2 + PET_DRAG_OFFSET_Y),
     show: false,
     frame: false,
     resizable: false,
@@ -525,7 +555,7 @@ function showPet() {
   win.show()
   win.moveTop()
   drag.show()
-  syncRenderWindowToDragWindow()
+  sendPetAnchor()
   drag.moveTop()
 }
 
