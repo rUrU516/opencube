@@ -4,16 +4,19 @@ exports.CubeEffectController = void 0;
 const angular_damping_1 = require("../cube/disturbances/angular-damping");
 const face_dim_1 = require("../cube/disturbances/face-dim");
 const face_light_up_1 = require("../cube/disturbances/face-light-up");
+const particle_emitter_1 = require("../cube/disturbances/particle-emitter");
 const BUSY_DAMPING_REDUCTION_ID = "global:busy-damping-reduction";
 const FACE_COUNT = 6;
 class CubeEffectController {
     cube;
     faceOwners;
     sessionFaces;
+    toolParticleDisturbanceIDs;
     constructor(cube) {
         this.cube = cube;
         this.faceOwners = Array.from({ length: FACE_COUNT });
         this.sessionFaces = new Map();
+        this.toolParticleDisturbanceIDs = new Map();
     }
     sync(openCodeState, event) {
         const previousStatus = this.getSessionStatus(openCodeState, event.sessionID);
@@ -28,11 +31,21 @@ class CubeEffectController {
         }
         if (event.type === "session.idle" && this.isBusyOrRetry(previousStatus)) {
             const faceIndex = this.releaseFace(event.sessionID);
-            if (faceIndex !== undefined)
+            if (faceIndex !== undefined) {
+                this.stopToolParticles(event.sessionID, faceIndex);
                 this.cube.addDisturbance(new face_dim_1.FaceDimDisturbance({ faceIndex, brightness: 0 }));
+            }
             if (!this.hasOtherBusyOrRetrySession(openCodeState, event.sessionID)) {
                 this.cube.markDisturbanceDone(BUSY_DAMPING_REDUCTION_ID);
             }
+            return;
+        }
+        if (event.type === "tool.start") {
+            this.startToolParticles(openCodeState, event.sessionID);
+            return;
+        }
+        if (event.type === "tool.finish") {
+            this.stopToolParticlesIfLastTool(openCodeState, event.sessionID, event.callID);
             return;
         }
     }
@@ -69,6 +82,37 @@ class CubeEffectController {
         this.sessionFaces.delete(sessionID);
         this.faceOwners[faceIndex] = undefined;
         return faceIndex;
+    }
+    getSessionFace(sessionID) {
+        return this.sessionFaces.get(sessionID);
+    }
+    toolParticleDisturbanceID(sessionID, faceIndex) {
+        return `session:${sessionID}:face:${faceIndex}:tool-particles`;
+    }
+    startToolParticles(openCodeState, sessionID) {
+        const session = openCodeState.sessions.get(sessionID);
+        if (!session || session.activeTools.size > 0)
+            return;
+        const faceIndex = this.getSessionFace(sessionID);
+        if (faceIndex === undefined)
+            return;
+        const id = this.toolParticleDisturbanceID(sessionID, faceIndex);
+        this.toolParticleDisturbanceIDs.set(sessionID, id);
+        this.cube.addDisturbance(new particle_emitter_1.ParticleEmitterDisturbance({ faceIndex }), id);
+    }
+    stopToolParticlesIfLastTool(openCodeState, sessionID, callID) {
+        const session = openCodeState.sessions.get(sessionID);
+        if (!session || !session.activeTools.has(callID) || session.activeTools.size > 1)
+            return;
+        const faceIndex = this.getSessionFace(sessionID);
+        if (faceIndex === undefined)
+            return;
+        const id = this.toolParticleDisturbanceIDs.get(sessionID) || this.toolParticleDisturbanceID(sessionID, faceIndex);
+        this.stopToolParticles(sessionID, faceIndex, id);
+    }
+    stopToolParticles(sessionID, faceIndex, id = this.toolParticleDisturbanceIDs.get(sessionID) || this.toolParticleDisturbanceID(sessionID, faceIndex)) {
+        this.cube.markDisturbanceDone(id);
+        this.toolParticleDisturbanceIDs.delete(sessionID);
     }
     hasBusyOrRetrySession(openCodeState) {
         for (const session of openCodeState.sessions.values()) {

@@ -2,7 +2,6 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.DisturbancePool = void 0;
 const angular_damping_1 = require("./disturbances/angular-damping");
-const particle_emitter_1 = require("./disturbances/particle-emitter");
 const particle_fade_1 = require("./disturbances/particle-fade");
 const random_angular_kick_1 = require("./disturbances/random-angular-kick");
 class DisturbancePool {
@@ -18,7 +17,6 @@ class DisturbancePool {
             },
             { id: "global:base-damping", disturbance: new angular_damping_1.AngularDampingDisturbance(2.0) },
             { id: "global:particle-fade", disturbance: new particle_fade_1.ParticleFadeDisturbance({ fadeStartDistance: 1.6, maxDistance: 6.2 }) },
-            { id: "test:face-0-particle-emitter", disturbance: new particle_emitter_1.ParticleEmitterDisturbance({ faceIndex: 0 }) },
             ...disturbances.map((disturbance) => ({ disturbance })),
         ];
     }

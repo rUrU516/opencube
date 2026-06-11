@@ -1,6 +1,5 @@
 import type { CubeState } from "./state"
 import { AngularDampingDisturbance } from "./disturbances/angular-damping"
-import { ParticleEmitterDisturbance } from "./disturbances/particle-emitter"
 import { ParticleFadeDisturbance } from "./disturbances/particle-fade"
 import { RandomAngularKickDisturbance } from "./disturbances/random-angular-kick"
 
@@ -28,7 +27,6 @@ export class DisturbancePool {
       },
       { id: "global:base-damping", disturbance: new AngularDampingDisturbance(2.0) },
       { id: "global:particle-fade", disturbance: new ParticleFadeDisturbance({ fadeStartDistance: 1.6, maxDistance: 6.2 }) },
-      { id: "test:face-0-particle-emitter", disturbance: new ParticleEmitterDisturbance({ faceIndex: 0 }) },
       ...disturbances.map((disturbance) => ({ disturbance })),
     ]
   }
