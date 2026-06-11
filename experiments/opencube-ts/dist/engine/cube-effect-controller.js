@@ -7,6 +7,7 @@ const face_light_up_1 = require("../cube/disturbances/face-light-up");
 const particle_emitter_1 = require("../cube/disturbances/particle-emitter");
 const BUSY_DAMPING_REDUCTION_ID = "global:busy-damping-reduction";
 const FACE_COUNT = 6;
+const TOOL_PARTICLE_STOP_DELAY_MS = 2000;
 function randomBetween(min, max) {
     return min + Math.random() * (max - min);
 }
@@ -130,7 +131,10 @@ class CubeEffectController {
         if (faceIndex === undefined)
             return;
         const id = this.toolParticleDisturbanceIDs.get(sessionID) || this.toolParticleDisturbanceID(sessionID, faceIndex);
-        this.stopToolParticles(sessionID, faceIndex, id);
+        const timer = setTimeout(() => {
+            this.stopToolParticles(sessionID, faceIndex, id);
+        }, TOOL_PARTICLE_STOP_DELAY_MS);
+        timer.unref?.();
     }
     stopToolParticles(sessionID, faceIndex, id = this.toolParticleDisturbanceIDs.get(sessionID) || this.toolParticleDisturbanceID(sessionID, faceIndex)) {
         this.cube.markDisturbanceDone(id);

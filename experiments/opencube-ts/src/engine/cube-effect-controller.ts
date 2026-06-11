@@ -8,6 +8,7 @@ import type { OpenCodeEvent, OpenCodeState, SessionStatus } from "../opencode/st
 
 const BUSY_DAMPING_REDUCTION_ID = "global:busy-damping-reduction"
 const FACE_COUNT = 6
+const TOOL_PARTICLE_STOP_DELAY_MS = 2000
 
 function randomBetween(min: number, max: number) {
   return min + Math.random() * (max - min)
@@ -147,7 +148,10 @@ export class CubeEffectController {
     if (faceIndex === undefined) return
 
     const id = this.toolParticleDisturbanceIDs.get(sessionID) || this.toolParticleDisturbanceID(sessionID, faceIndex)
-    this.stopToolParticles(sessionID, faceIndex, id)
+    const timer = setTimeout(() => {
+      this.stopToolParticles(sessionID, faceIndex, id)
+    }, TOOL_PARTICLE_STOP_DELAY_MS)
+    timer.unref?.()
   }
 
   private stopToolParticles(sessionID: string, faceIndex: number, id = this.toolParticleDisturbanceIDs.get(sessionID) || this.toolParticleDisturbanceID(sessionID, faceIndex)) {
