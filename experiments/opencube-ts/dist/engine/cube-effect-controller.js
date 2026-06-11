@@ -7,14 +7,26 @@ const face_light_up_1 = require("../cube/disturbances/face-light-up");
 const particle_emitter_1 = require("../cube/disturbances/particle-emitter");
 const BUSY_DAMPING_REDUCTION_ID = "global:busy-damping-reduction";
 const FACE_COUNT = 6;
+function randomBetween(min, max) {
+    return min + Math.random() * (max - min);
+}
+function randomOwnershipColor() {
+    const channels = [Math.round(randomBetween(30, 190)), Math.round(randomBetween(30, 190)), Math.round(randomBetween(30, 190))];
+    const hot = Math.floor(randomBetween(0, 3));
+    channels[hot] = Math.round(randomBetween(190, 235));
+    channels[(hot + 1) % 3] = Math.max(channels[(hot + 1) % 3], Math.round(randomBetween(105, 200)));
+    return { r: channels[0], g: channels[1], b: channels[2] };
+}
 class CubeEffectController {
     cube;
     faceOwners;
+    faceColors;
     sessionFaces;
     toolParticleDisturbanceIDs;
     constructor(cube) {
         this.cube = cube;
         this.faceOwners = Array.from({ length: FACE_COUNT });
+        this.faceColors = Array.from({ length: FACE_COUNT });
         this.sessionFaces = new Map();
         this.toolParticleDisturbanceIDs = new Map();
     }
@@ -23,7 +35,7 @@ class CubeEffectController {
         if ((event.type === "session.busy" || event.type === "session.retry") && !this.isBusyOrRetry(previousStatus)) {
             const faceIndex = this.acquireFace(event.sessionID);
             if (faceIndex !== undefined)
-                this.cube.addDisturbance(new face_light_up_1.FaceLightUpDisturbance({ faceIndex }));
+                this.cube.addDisturbance(new face_light_up_1.FaceLightUpDisturbance({ faceIndex, color: this.getFaceColor(faceIndex) }));
             if (!this.hasBusyOrRetrySession(openCodeState)) {
                 this.cube.addDisturbance(new angular_damping_1.AngularDampingDisturbance(-1.85), BUSY_DAMPING_REDUCTION_ID);
             }
@@ -72,6 +84,7 @@ class CubeEffectController {
         if (freeIndex === -1)
             return undefined;
         this.faceOwners[freeIndex] = sessionID;
+        this.faceColors[freeIndex] = randomOwnershipColor();
         this.sessionFaces.set(sessionID, freeIndex);
         return freeIndex;
     }
@@ -81,7 +94,16 @@ class CubeEffectController {
             return undefined;
         this.sessionFaces.delete(sessionID);
         this.faceOwners[faceIndex] = undefined;
+        this.faceColors[faceIndex] = undefined;
         return faceIndex;
+    }
+    getFaceColor(faceIndex) {
+        const existing = this.faceColors[faceIndex];
+        if (existing)
+            return existing;
+        const color = randomOwnershipColor();
+        this.faceColors[faceIndex] = color;
+        return color;
     }
     getSessionFace(sessionID) {
         return this.sessionFaces.get(sessionID);
@@ -98,7 +120,7 @@ class CubeEffectController {
             return;
         const id = this.toolParticleDisturbanceID(sessionID, faceIndex);
         this.toolParticleDisturbanceIDs.set(sessionID, id);
-        this.cube.addDisturbance(new particle_emitter_1.ParticleEmitterDisturbance({ faceIndex }), id);
+        this.cube.addDisturbance(new particle_emitter_1.ParticleEmitterDisturbance({ faceIndex, color: this.getFaceColor(faceIndex) }), id);
     }
     stopToolParticlesIfLastTool(openCodeState, sessionID, callID) {
         const session = openCodeState.sessions.get(sessionID);

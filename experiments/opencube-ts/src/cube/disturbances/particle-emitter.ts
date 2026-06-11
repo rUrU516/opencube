@@ -14,14 +14,6 @@ function randomBetween(min: number, max: number) {
   return min + Math.random() * (max - min)
 }
 
-function randomColor(): Color {
-  const channels = [Math.round(randomBetween(30, 190)), Math.round(randomBetween(30, 190)), Math.round(randomBetween(30, 190))]
-  const hot = Math.floor(randomBetween(0, 3))
-  channels[hot] = Math.round(randomBetween(190, 235))
-  channels[(hot + 1) % 3] = Math.max(channels[(hot + 1) % 3], Math.round(randomBetween(105, 200)))
-  return { r: channels[0], g: channels[1], b: channels[2] }
-}
-
 function normalize(vector: Vector3): Vector3 {
   const length = Math.sqrt(vector.x * vector.x + vector.y * vector.y + vector.z * vector.z) || 1
   return { x: vector.x / length, y: vector.y / length, z: vector.z / length }
@@ -77,12 +69,14 @@ export class ParticleEmitterDisturbance implements Disturbance {
   faceIndex: number
   rate: number
   speed: number
+  color: Color
   accumulator: number
 
-  constructor(options: { faceIndex: number; rate?: number; speed?: number }) {
+  constructor(options: { faceIndex: number; color: Color; rate?: number; speed?: number }) {
     this.faceIndex = options.faceIndex
     this.rate = options.rate ?? 7
     this.speed = options.speed ?? 4.2
+    this.color = options.color
     this.accumulator = 0
   }
 
@@ -107,7 +101,7 @@ export class ParticleEmitterDisturbance implements Disturbance {
           y: direction.y * this.speed,
           z: direction.z * this.speed,
         },
-        color: randomColor(),
+        color: this.color,
         alpha: 1,
         size: randomBetween(0.16, 0.26),
       })

@@ -3,18 +3,33 @@ import { FaceDimDisturbance } from "../cube/disturbances/face-dim"
 import { FaceLightUpDisturbance } from "../cube/disturbances/face-light-up"
 import { ParticleEmitterDisturbance } from "../cube/disturbances/particle-emitter"
 import type { Cube } from "../cube/cube"
+import type { Color } from "../cube/state"
 import type { OpenCodeEvent, OpenCodeState, SessionStatus } from "../opencode/state"
 
 const BUSY_DAMPING_REDUCTION_ID = "global:busy-damping-reduction"
 const FACE_COUNT = 6
 
+function randomBetween(min: number, max: number) {
+  return min + Math.random() * (max - min)
+}
+
+function randomOwnershipColor(): Color {
+  const channels = [Math.round(randomBetween(30, 190)), Math.round(randomBetween(30, 190)), Math.round(randomBetween(30, 190))]
+  const hot = Math.floor(randomBetween(0, 3))
+  channels[hot] = Math.round(randomBetween(190, 235))
+  channels[(hot + 1) % 3] = Math.max(channels[(hot + 1) % 3], Math.round(randomBetween(105, 200)))
+  return { r: channels[0], g: channels[1], b: channels[2] }
+}
+
 export class CubeEffectController {
   private faceOwners: Array<string | undefined>
+  private faceColors: Array<Color | undefined>
   private sessionFaces: Map<string, number>
   private toolParticleDisturbanceIDs: Map<string, string>
 
   constructor(private cube: Cube) {
     this.faceOwners = Array.from({ length: FACE_COUNT })
+    this.faceColors = Array.from({ length: FACE_COUNT })
     this.sessionFaces = new Map()
     this.toolParticleDisturbanceIDs = new Map()
   }
@@ -24,7 +39,7 @@ export class CubeEffectController {
 
     if ((event.type === "session.busy" || event.type === "session.retry") && !this.isBusyOrRetry(previousStatus)) {
       const faceIndex = this.acquireFace(event.sessionID)
-      if (faceIndex !== undefined) this.cube.addDisturbance(new FaceLightUpDisturbance({ faceIndex }))
+      if (faceIndex !== undefined) this.cube.addDisturbance(new FaceLightUpDisturbance({ faceIndex, color: this.getFaceColor(faceIndex) }))
 
       if (!this.hasBusyOrRetrySession(openCodeState)) {
         this.cube.addDisturbance(new AngularDampingDisturbance(-1.85), BUSY_DAMPING_REDUCTION_ID)
@@ -80,6 +95,7 @@ export class CubeEffectController {
     if (freeIndex === -1) return undefined
 
     this.faceOwners[freeIndex] = sessionID
+    this.faceColors[freeIndex] = randomOwnershipColor()
     this.sessionFaces.set(sessionID, freeIndex)
     return freeIndex
   }
@@ -90,7 +106,17 @@ export class CubeEffectController {
 
     this.sessionFaces.delete(sessionID)
     this.faceOwners[faceIndex] = undefined
+    this.faceColors[faceIndex] = undefined
     return faceIndex
+  }
+
+  private getFaceColor(faceIndex: number) {
+    const existing = this.faceColors[faceIndex]
+    if (existing) return existing
+
+    const color = randomOwnershipColor()
+    this.faceColors[faceIndex] = color
+    return color
   }
 
   private getSessionFace(sessionID: string) {
@@ -110,7 +136,7 @@ export class CubeEffectController {
 
     const id = this.toolParticleDisturbanceID(sessionID, faceIndex)
     this.toolParticleDisturbanceIDs.set(sessionID, id)
-    this.cube.addDisturbance(new ParticleEmitterDisturbance({ faceIndex }), id)
+    this.cube.addDisturbance(new ParticleEmitterDisturbance({ faceIndex, color: this.getFaceColor(faceIndex) }), id)
   }
 
   private stopToolParticlesIfLastTool(openCodeState: OpenCodeState, sessionID: string, callID: string) {
