@@ -15,10 +15,10 @@ function randomBetween(min: number, max: number) {
 }
 
 function randomColor(): Color {
-  const channels = [Math.round(randomBetween(80, 255)), Math.round(randomBetween(80, 255)), Math.round(randomBetween(80, 255))]
+  const channels = [Math.round(randomBetween(30, 190)), Math.round(randomBetween(30, 190)), Math.round(randomBetween(30, 190))]
   const hot = Math.floor(randomBetween(0, 3))
-  channels[hot] = 255
-  channels[(hot + 1) % 3] = Math.max(channels[(hot + 1) % 3], Math.round(randomBetween(180, 255)))
+  channels[hot] = Math.round(randomBetween(190, 235))
+  channels[(hot + 1) % 3] = Math.max(channels[(hot + 1) % 3], Math.round(randomBetween(105, 200)))
   return { r: channels[0], g: channels[1], b: channels[2] }
 }
 
@@ -82,7 +82,7 @@ export class ParticleEmitterDisturbance implements Disturbance {
   constructor(options: { faceIndex: number; rate?: number; speed?: number }) {
     this.faceIndex = options.faceIndex
     this.rate = options.rate ?? 7
-    this.speed = options.speed ?? 1.85
+    this.speed = options.speed ?? 4.2
     this.accumulator = 0
   }
 

@@ -283,7 +283,7 @@ function petHtml() {
       }
 
       function renderParticles(particles) {
-        const visibleParticles = particles.slice(-120)
+        const visibleParticles = particles
         while (particleSprites.length < visibleParticles.length) {
           const material = new THREE.SpriteMaterial({
             map: glowTexture,
