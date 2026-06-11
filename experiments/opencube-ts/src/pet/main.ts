@@ -148,10 +148,7 @@ function petHtml() {
         position: relative;
         background: transparent;
         user-select: none;
-        -webkit-app-region: drag;
-        cursor: grab;
       }
-      .stage:active { cursor: grabbing; }
       #scene { position: absolute; inset: 0; width: ${PET_RENDER_SIZE}px; height: ${PET_RENDER_SIZE}px; pointer-events: none; }
     </style>
   </head>
@@ -408,6 +405,7 @@ function createPetWindow() {
   })
   petWindow.setAlwaysOnTop(true, "floating")
   petWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(petHtml())}`)
+  petWindow.setIgnoreMouseEvents(true, { forward: true })
   petWindow.on("closed", () => {
     petWindow = null
   })
