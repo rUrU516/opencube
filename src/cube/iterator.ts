@@ -28,9 +28,13 @@ export class CubeIterator {
     this.state.rotation.z += this.state.angularVelocity.z * dt
 
     for (const particle of this.state.particles) {
-      particle.position.x += particle.velocity.x * dt
-      particle.position.y += particle.velocity.y * dt
-      particle.position.z += particle.velocity.z * dt
+      const dx = particle.velocity.x * dt
+      const dy = particle.velocity.y * dt
+      const dz = particle.velocity.z * dt
+      particle.position.x += dx
+      particle.position.y += dy
+      particle.position.z += dz
+      particle.travelDistance += Math.sqrt(dx * dx + dy * dy + dz * dz)
     }
   }
 }

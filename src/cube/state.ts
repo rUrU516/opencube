@@ -16,8 +16,10 @@ export type FaceState = {
 }
 
 export type ParticleState = {
+  id: number
   position: Vector3
   velocity: Vector3
+  travelDistance: number
   color: Color
   alpha: number
   size: number

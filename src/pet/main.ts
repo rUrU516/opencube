@@ -201,7 +201,8 @@ function petHtml() {
       const glowTexture = createGlowTexture()
       const rad = THREE.MathUtils.degToRad
       const faceGlows = []
-      const particleSprites = []
+      const particleSprites = new Map()
+      const idleParticleSprites = []
 
       function createGlowTexture() {
         const canvas = document.createElement("canvas")
@@ -291,7 +292,9 @@ function petHtml() {
 
       function renderParticles(particles) {
         const visibleParticles = particles
-        while (particleSprites.length < visibleParticles.length) {
+        const liveParticleKeys = new Set()
+
+        function createParticleSprite() {
           const material = new THREE.SpriteMaterial({
             map: glowTexture,
             color: 0xffffff,
@@ -301,23 +304,42 @@ function petHtml() {
             depthWrite: false,
           })
           const sprite = new THREE.Sprite(material)
-          petRoot.add(sprite)
-          particleSprites.push(sprite)
+          scene.add(sprite)
+          return sprite
         }
 
-        for (let index = 0; index < particleSprites.length; index += 1) {
-          const sprite = particleSprites[index]
+        for (let index = 0; index < visibleParticles.length; index += 1) {
           const particle = visibleParticles[index]
-          if (!particle) {
-            sprite.visible = false
-            sprite.material.opacity = 0
-            continue
+          const key = String(particle?.id ?? index)
+          liveParticleKeys.add(key)
+
+          let entry = particleSprites.get(key)
+          if (!entry) {
+            entry = {
+              sprite: idleParticleSprites.pop() || createParticleSprite(),
+              origin: petRoot.position.clone(),
+              viewScale,
+            }
+            particleSprites.set(key, entry)
           }
+          const sprite = entry.sprite
           sprite.visible = true
-          sprite.position.set(particle.position.x * viewScale, particle.position.y * viewScale, particle.position.z * viewScale)
-          sprite.scale.setScalar((particle.size || 0.12) * viewScale)
+          sprite.position.set(
+            entry.origin.x + particle.position.x * entry.viewScale,
+            entry.origin.y + particle.position.y * entry.viewScale,
+            entry.origin.z + particle.position.z * entry.viewScale,
+          )
+          sprite.scale.setScalar((particle.size || 0.12) * entry.viewScale)
           sprite.material.color.setRGB((particle.color.r || 255) / 255, (particle.color.g || 255) / 255, (particle.color.b || 255) / 255)
           sprite.material.opacity = Math.max(0, Math.min(1, particle.alpha ?? 1))
+        }
+
+        for (const [key, entry] of particleSprites) {
+          if (liveParticleKeys.has(key)) continue
+          entry.sprite.visible = false
+          entry.sprite.material.opacity = 0
+          particleSprites.delete(key)
+          idleParticleSprites.push(entry.sprite)
         }
       }
 

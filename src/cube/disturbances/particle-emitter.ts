@@ -10,6 +10,8 @@ const FACE_NORMALS: Vector3[] = [
   { x: 0, y: -1, z: 0 },
 ]
 
+let nextParticleID = 1
+
 function randomBetween(min: number, max: number) {
   return min + Math.random() * (max - min)
 }
@@ -93,6 +95,7 @@ export class ParticleEmitterDisturbance implements Disturbance {
       this.accumulator -= 1
       const direction = coneDirection(normal)
       state.particles.push({
+        id: nextParticleID++,
         position: {
           x: normal.x * 0.38,
           y: normal.y * 0.38,
@@ -103,6 +106,7 @@ export class ParticleEmitterDisturbance implements Disturbance {
           y: direction.y * this.speed,
           z: direction.z * this.speed,
         },
+        travelDistance: 0,
         color: this.color,
         alpha: 1,
         size: randomBetween(0.16, 0.26) + this.particleSizeAdd,

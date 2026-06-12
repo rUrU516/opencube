@@ -10,8 +10,7 @@ class ParticleFadeDisturbance {
     }
     apply(state) {
         state.particles = state.particles.filter((particle) => {
-            const { x, y, z } = particle.position;
-            const distance = Math.sqrt(x * x + y * y + z * z);
+            const distance = particle.travelDistance || 0;
             if (distance >= this.maxDistance)
                 return false;
             if (distance <= this.fadeStartDistance) {

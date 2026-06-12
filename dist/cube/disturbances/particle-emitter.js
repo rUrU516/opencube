@@ -9,6 +9,7 @@ const FACE_NORMALS = [
     { x: 0, y: 1, z: 0 },
     { x: 0, y: -1, z: 0 },
 ];
+let nextParticleID = 1;
 function randomBetween(min, max) {
     return min + Math.random() * (max - min);
 }
@@ -80,6 +81,7 @@ class ParticleEmitterDisturbance {
             this.accumulator -= 1;
             const direction = coneDirection(normal);
             state.particles.push({
+                id: nextParticleID++,
                 position: {
                     x: normal.x * 0.38,
                     y: normal.y * 0.38,
@@ -90,6 +92,7 @@ class ParticleEmitterDisturbance {
                     y: direction.y * this.speed,
                     z: direction.z * this.speed,
                 },
+                travelDistance: 0,
                 color: this.color,
                 alpha: 1,
                 size: randomBetween(0.16, 0.26) + this.particleSizeAdd,
