@@ -1,24 +1,31 @@
 {
   "name": "opencube",
-  "version": "0.4.1",
+  "version": "0.5.0",
   "description": "A tiny Three.js desktop pet for opencode session activity.",
-  "main": "src/main.js",
+  "type": "commonjs",
+  "main": "dist/plugin/server.js",
   "exports": {
-    "./server": "./src/plugin-server.cjs"
+    "./server": "./dist/plugin/server.js"
   },
   "files": [
     "assets",
+    "dist",
     "src",
     "README.md"
   ],
   "scripts": {
-    "start": "electron ."
+    "build": "tsc",
+    "start": "electron dist/pet/main.js",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@electron/get": "^2.0.3",
     "electron": "^39.2.6",
     "extract-zip": "^2.0.1",
     "three": "^0.184.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3"
   },
   "keywords": [
     "opencode",

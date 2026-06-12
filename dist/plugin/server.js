@@ -3,7 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.id = void 0;
 exports.server = server;
 const electron_bridge_1 = require("./electron-bridge");
-const COMMAND_HANDLED_SENTINEL = "__OPENCUBE_TS_TEST_COMMAND_HANDLED__";
+const COMMAND_HANDLED_SENTINEL = "__OPENCODE_PET_COMMAND_HANDLED__";
 function handled() {
     throw new Error(COMMAND_HANDLED_SENTINEL);
 }
@@ -43,72 +43,76 @@ async function injectNotice(client, sessionID, text) {
         // Best-effort only. The test command should still be treated as handled.
     }
 }
-exports.id = "opencube-ts-test";
+exports.id = "opencube";
 async function server({ client }) {
-    const handledCommands = new Set(["opencube-ts-test", "opencube-ts-pet", "opencube-ts-stop", "opencube-ts-restart", "opencube-ts-hello", "opencube-ts-drag-border"]);
+    const handledCommands = new Set(["pet", "pet_stop", "pet_restart", "pet_say_hello", "pet-drag-border", "pet_drag_border", "pet_test"]);
     return {
         config: async (cfg) => {
             cfg.command ??= {};
-            cfg.command["opencube-ts-test"] = {
-                template: "/opencube-ts-test",
-                description: "Send a minimal test notice from the experimental TypeScript OpenCube plugin.",
+            cfg.command.pet = {
+                template: "/pet",
+                description: "Start or show the desktop OpenCube pet without sending anything to the agent.",
             };
-            cfg.command["opencube-ts-pet"] = {
-                template: "/opencube-ts-pet",
-                description: "Start or show the desktop OpenCube pet from the TypeScript experiment plugin.",
+            cfg.command.pet_stop = {
+                template: "/pet_stop",
+                description: "Quit the desktop OpenCube pet without sending anything to the agent.",
             };
-            cfg.command["opencube-ts-stop"] = {
-                template: "/opencube-ts-stop",
-                description: "Quit the desktop OpenCube pet from the TypeScript experiment plugin.",
+            cfg.command.pet_restart = {
+                template: "/pet_restart",
+                description: "Restart the desktop OpenCube pet.",
             };
-            cfg.command["opencube-ts-restart"] = {
-                template: "/opencube-ts-restart",
-                description: "Restart the desktop OpenCube pet from the TypeScript experiment plugin.",
+            cfg.command.pet_say_hello = {
+                template: "/pet_say_hello",
+                description: "Send a hello test event to OpenCube.",
             };
-            cfg.command["opencube-ts-hello"] = {
-                template: "/opencube-ts-hello",
-                description: "Send a hello event to OpenCube from the TypeScript experiment plugin.",
+            cfg.command["pet-drag-border"] = {
+                template: "/pet-drag-border",
+                description: "Show/hide/toggle the OpenCube drag handle border, e.g. /pet-drag-border hide.",
             };
-            cfg.command["opencube-ts-drag-border"] = {
-                template: "/opencube-ts-drag-border",
-                description: "Show/hide/toggle the OpenCube TS drag handle border, e.g. /opencube-ts-drag-border hide.",
+            cfg.command.pet_drag_border = {
+                template: "/pet_drag_border",
+                description: "Alias for /pet-drag-border.",
+            };
+            cfg.command.pet_test = {
+                template: "/pet_test",
+                description: "Send a minimal test notice from the OpenCube plugin.",
             };
         },
         "command.execute.before": async (input) => {
             if (!handledCommands.has(input.command))
                 return;
-            if (input.command === "opencube-ts-test") {
-                await injectNotice(client, input.sessionID, "◈ OpenCube TS experiment plugin is alive.");
+            if (input.command === "pet_test") {
+                await injectNotice(client, input.sessionID, "◈ OpenCube plugin is alive.");
             }
-            if (input.command === "opencube-ts-pet") {
+            if (input.command === "pet") {
                 const health = await (0, electron_bridge_1.showPet)({
                     onProgress: (message) => injectNotice(client, input.sessionID, message),
                 });
-                await injectNotice(client, input.sessionID, health ? "◈ OpenCube TS experiment started the pet." : "◈ OpenCube TS experiment asked the pet to start; it may still be warming up.");
+                await injectNotice(client, input.sessionID, health ? "◈ OpenCube started the pet." : "◈ OpenCube asked the pet to start; it may still be warming up.");
             }
-            if (input.command === "opencube-ts-stop") {
+            if (input.command === "pet_stop") {
                 const stopped = await (0, electron_bridge_1.quitPet)();
-                await injectNotice(client, input.sessionID, stopped ? "◌ OpenCube TS experiment stopped the pet." : "◌ OpenCube pet was not running.");
+                await injectNotice(client, input.sessionID, stopped ? "◌ OpenCube stopped the pet." : "◌ OpenCube pet was not running.");
             }
-            if (input.command === "opencube-ts-restart") {
+            if (input.command === "pet_restart") {
                 await (0, electron_bridge_1.quitPet)();
                 await delay(300);
                 const health = await (0, electron_bridge_1.showPet)({
                     onProgress: (message) => injectNotice(client, input.sessionID, message),
                 });
-                await injectNotice(client, input.sessionID, health ? "↻ OpenCube TS experiment restarted the pet." : "↻ OpenCube TS experiment restarted the pet; it may still be warming up.");
+                await injectNotice(client, input.sessionID, health ? "↻ OpenCube restarted the pet." : "↻ OpenCube restarted the pet; it may still be warming up.");
             }
-            if (input.command === "opencube-ts-hello") {
+            if (input.command === "pet_say_hello") {
                 const result = await (0, electron_bridge_1.sendEvent)({
                     type: "hello",
                     sessionID: input.sessionID,
                 });
-                await injectNotice(client, input.sessionID, result ? "✦ OpenCube TS experiment sent hello." : "☾ OpenCube is sleeping. Start it with /opencube-ts-pet first.");
+                await injectNotice(client, input.sessionID, result ? "✦ OpenCube sent hello." : "☾ OpenCube is sleeping. Start it with /pet first.");
             }
-            if (input.command === "opencube-ts-drag-border") {
+            if (input.command === "pet-drag-border" || input.command === "pet_drag_border") {
                 const visible = parseDragBorderVisibility(input.arguments);
                 const result = await (0, electron_bridge_1.setDragBorder)(visible);
-                await injectNotice(client, input.sessionID, result ? `▣ OpenCube TS drag border ${result.visible ? "shown" : "hidden"}.` : "☾ OpenCube is sleeping. Start it with /opencube-ts-pet first.");
+                await injectNotice(client, input.sessionID, result ? `▣ OpenCube drag border ${result.visible ? "shown" : "hidden"}.` : "☾ OpenCube is sleeping. Start it with /pet first.");
             }
             handled();
         },

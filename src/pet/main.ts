@@ -8,10 +8,10 @@ const fs = require("node:fs")
 const http = require("node:http")
 const path = require("node:path")
 
-const APP_NAME = "OpenCube TS Experiment"
+const APP_NAME = "OpenCube"
 const HOST = "127.0.0.1"
-const PORT = Number(process.env.OPENCODE_TS_PET_PORT || process.env.OPENCODE_PET_PORT || 47833)
-const ICON_PATH = path.resolve(__dirname, "../../../../assets/opencode-icon.png")
+const PORT = Number(process.env.OPENCODE_PET_PORT || 47832)
+const ICON_PATH = path.resolve(__dirname, "../../assets/opencode-icon.png")
 const PET_CUBE_SIZE = 120
 const PET_DRAG_SIZE = 60
 const PET_DRAG_OFFSET_Y = 10
@@ -159,7 +159,7 @@ function petHtml() {
     </style>
   </head>
   <body>
-    <div class="stage"><canvas id="scene" aria-label="OpenCube TS cube"></canvas></div>
+    <div class="stage"><canvas id="scene" aria-label="OpenCube cube"></canvas></div>
     <script>
       const THREE = require(${threeCjsPath})
       const { ipcRenderer } = require("electron")
@@ -420,7 +420,7 @@ function dragTestHtml() {
       }
     </style>
   </head>
-  <body><div class="drag-test" aria-label="OpenCube TS drag handle"></div></body>
+  <body><div class="drag-test" aria-label="OpenCube drag handle"></div></body>
 </html>`
 }
 
@@ -482,7 +482,7 @@ function panelHtml() {
       .event.open pre, .state-card.open pre { display: block; }
     </style>
   </head>
-  <body><main class="panel"><div class="top"><h1>OpenCube TS Debug Panel</h1></div><div class="meta">Sessions ${state.totals.sessions} · busy ${state.totals.busy} · retry ${state.totals.retry} · tools ${state.totals.tools} · permissions ${state.totals.permissions} · questions ${state.totals.questions}</div><div class="columns"><section class="column"><h2>OpenCode State</h2><div class="state">${stateRows || '<div class="empty">No sessions yet.</div>'}</div></section><section class="column"><h2>Raw Events</h2><div class="events">${rows || '<div class="empty">No events yet.</div>'}</div></section></div></main><script>document.querySelectorAll(".event,.state-card").forEach((card) => card.addEventListener("click", () => card.classList.toggle("open")))</script></body>
+  <body><main class="panel"><div class="top"><h1>OpenCube Debug Panel</h1></div><div class="meta">Sessions ${state.totals.sessions} · busy ${state.totals.busy} · retry ${state.totals.retry} · tools ${state.totals.tools} · permissions ${state.totals.permissions} · questions ${state.totals.questions}</div><div class="columns"><section class="column"><h2>OpenCode State</h2><div class="state">${stateRows || '<div class="empty">No sessions yet.</div>'}</div></section><section class="column"><h2>Raw Events</h2><div class="events">${rows || '<div class="empty">No events yet.</div>'}</div></section></div></main><script>document.querySelectorAll(".event,.state-card").forEach((card) => card.addEventListener("click", () => card.classList.toggle("open")))</script></body>
 </html>`
 }
 
@@ -659,10 +659,10 @@ function createTray() {
   tray.setToolTip(APP_NAME)
   tray.setContextMenu(
     Menu.buildFromTemplate([
-      { label: "Show OpenCube TS", click: showPet },
+      { label: "Show OpenCube", click: showPet },
       { label: "Show Debug Panel", click: showPanel },
       { label: "Hide Debug Panel", click: hidePanel },
-      { label: "Quit OpenCube TS", click: () => app.quit() },
+      { label: "Quit OpenCube", click: () => app.quit() },
     ]),
   )
   return tray
@@ -676,7 +676,7 @@ function startServer() {
       const url = new URL(req.url || "/", `http://${HOST}:${PORT}`)
 
       if (req.method === "GET" && url.pathname === "/health") {
-        return json(res, 200, { status: "good", pet: "opencube-ts", pid: process.pid, port: PORT, events: events.length })
+        return json(res, 200, { status: "good", pet: "opencube", pid: process.pid, port: PORT, events: events.length })
       }
       if (req.method === "POST" && url.pathname === "/show") {
         showPet()

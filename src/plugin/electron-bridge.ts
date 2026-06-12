@@ -4,11 +4,11 @@ const os = require("node:os")
 const path = require("node:path")
 
 const PET_HOST = "127.0.0.1"
-const PET_PORT = Number(process.env.OPENCODE_TS_PET_PORT || process.env.OPENCODE_PET_PORT || 47833)
+const PET_PORT = Number(process.env.OPENCODE_PET_PORT || 47832)
 const PET_BASE_URL = `http://${PET_HOST}:${PET_PORT}`
 
 function repoRoot() {
-  // dist/plugin/electron-bridge.js -> experiments/opencube-ts/dist/plugin
+  // dist/plugin/electron-bridge.js -> dist/plugin
   return path.resolve(__dirname, "../..")
 }
 
@@ -79,11 +79,11 @@ async function installElectronBinary(electronDir: string, options: { onProgress?
   const executablePath = path.join(distPath, platformPath)
 
   if (fs.existsSync(executablePath)) {
-    await emitProgress(options.onProgress, "OpenCube TS: Electron binary is ready ✅")
+    await emitProgress(options.onProgress, "OpenCube: Electron binary is ready ✅")
     return executablePath
   }
 
-  await emitProgress(options.onProgress, `OpenCube TS: downloading Electron ${version} for ${platform}/${arch}...`)
+  await emitProgress(options.onProgress, `OpenCube: downloading Electron ${version} for ${platform}/${arch}...`)
   const zipPath = await downloadArtifact({
     version,
     artifactName: "electron",
@@ -92,28 +92,28 @@ async function installElectronBinary(electronDir: string, options: { onProgress?
     platform,
     arch,
   })
-  await emitProgress(options.onProgress, "OpenCube TS: extracting Electron binary...")
+  await emitProgress(options.onProgress, "OpenCube: extracting Electron binary...")
   await extractElectronZip(zipPath, distPath)
   await fs.promises.writeFile(path.join(electronDir, "path.txt"), platformPath)
-  await emitProgress(options.onProgress, "OpenCube TS: Electron binary installed ✅")
+  await emitProgress(options.onProgress, "OpenCube: Electron binary installed ✅")
   return executablePath
 }
 
 async function resolveElectronPath(options: { onProgress?: (message: string) => unknown } = {}) {
-  await emitProgress(options.onProgress, "OpenCube TS: checking Electron runtime...")
+  await emitProgress(options.onProgress, "OpenCube: checking Electron runtime...")
   try {
     const electronPath = require("electron")
     if (typeof electronPath === "string") {
-      await emitProgress(options.onProgress, "OpenCube TS: Electron runtime is ready ✅")
+      await emitProgress(options.onProgress, "OpenCube: Electron runtime is ready ✅")
       return electronPath
     }
 
-    await emitProgress(options.onProgress, "OpenCube TS: locating packaged Electron binary...")
+    await emitProgress(options.onProgress, "OpenCube: locating packaged Electron binary...")
     const electronPackage = require.resolve("electron/package.json")
     const electronDir = path.dirname(electronPackage)
     return await installElectronBinary(electronDir, options)
   } catch {
-    await emitProgress(options.onProgress, "OpenCube TS: Electron runtime is incomplete; repairing...")
+    await emitProgress(options.onProgress, "OpenCube: Electron runtime is incomplete; repairing...")
     const electronPackage = require.resolve("electron/package.json")
     const electronDir = path.dirname(electronPackage)
     return await installElectronBinary(electronDir, options)
@@ -145,34 +145,34 @@ export async function healthPet() {
 }
 
 async function waitForPet(timeoutMs = 3500, options: { onProgress?: (message: string) => unknown } = {}) {
-  await emitProgress(options.onProgress, "OpenCube TS: waiting for local server...")
+  await emitProgress(options.onProgress, "OpenCube: waiting for local server...")
   const startedAt = Date.now()
   while (Date.now() - startedAt < timeoutMs) {
     const health = await healthPet()
     if (health) {
-      await emitProgress(options.onProgress, "OpenCube TS: local server is ready ✅")
+      await emitProgress(options.onProgress, "OpenCube: local server is ready ✅")
       return health
     }
     await new Promise((resolve) => setTimeout(resolve, 150))
   }
-  await emitProgress(options.onProgress, "OpenCube TS: local server did not answer yet")
+  await emitProgress(options.onProgress, "OpenCube: local server did not answer yet")
   return undefined
 }
 
 export async function showPet(options: { onProgress?: (message: string) => unknown } = {}) {
-  await emitProgress(options.onProgress, "OpenCube TS: checking whether it is already running...")
+  await emitProgress(options.onProgress, "OpenCube: checking whether it is already running...")
   const existing = await healthPet()
   if (existing) {
-    await emitProgress(options.onProgress, "OpenCube TS: already running; showing window...")
+    await emitProgress(options.onProgress, "OpenCube: already running; showing window...")
     await requestPet("/show", { method: "POST", timeoutMs: 800 })
-    await emitProgress(options.onProgress, "OpenCube TS: shown ✨")
+    await emitProgress(options.onProgress, "OpenCube: shown ✨")
     return existing
   }
 
-  await emitProgress(options.onProgress, "OpenCube TS: not running; starting now...")
+  await emitProgress(options.onProgress, "OpenCube: not running; starting now...")
   const cwd = repoRoot()
   const electronPath = await resolveElectronPath(options)
-  await emitProgress(options.onProgress, "OpenCube TS: launching desktop pet...")
+  await emitProgress(options.onProgress, "OpenCube: launching desktop pet...")
   const child = spawn(electronPath, [path.join(cwd, "dist/pet/main.js")], {
     cwd,
     detached: true,
@@ -183,10 +183,10 @@ export async function showPet(options: { onProgress?: (message: string) => unkno
     },
   })
   child.unref()
-  await emitProgress(options.onProgress, "OpenCube TS: launch request sent 🐾")
+  await emitProgress(options.onProgress, "OpenCube: launch request sent 🐾")
   const health = await waitForPet(3500, options)
   await requestPet("/show", { method: "POST", timeoutMs: 800 })
-  await emitProgress(options.onProgress, health ? "OpenCube TS: shown ✨" : "OpenCube TS: start requested, still warming up...")
+  await emitProgress(options.onProgress, health ? "OpenCube: shown ✨" : "OpenCube: start requested, still warming up...")
   return health
 }
 
