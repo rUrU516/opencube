@@ -70,7 +70,7 @@ export class CubeEffectController {
       if (faceIndex !== undefined) this.cube.addDisturbance(new FaceLightUpDisturbance({ faceIndex, color: this.getFaceColor(faceIndex) }))
 
       if (!this.hasBusyOrRetrySession(openCodeState)) {
-        this.cube.addDisturbance(new AngularDampingDisturbance(-1.85), BUSY_DAMPING_REDUCTION_ID)
+        this.cube.addDisturbance(new AngularDampingDisturbance(-1.5), BUSY_DAMPING_REDUCTION_ID)
       }
       return
     }
