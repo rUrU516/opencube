@@ -1,7 +1,6 @@
 import { quitPet, sendEvent, setDragBorder, showPet } from "./electron-bridge"
 import { compareVersions } from "./features/update/compare"
 import { getLatestNpmVersion } from "./features/update/registry"
-import { runPluginUpgrade } from "./features/update/upgrade"
 import { getCurrentVersion } from "./features/update/version"
 
 const COMMAND_HANDLED_SENTINEL = "__OPENCODE_PET_COMMAND_HANDLED__"
@@ -143,27 +142,7 @@ export async function server({ client }: { client: any }) {
             }
             if (comparison < 0) {
               await injectNotice(client, input.sessionID, `OpenCube update available: v${current.version} → v${latest.version}`)
-              await injectNotice(client, input.sessionID, `OpenCube upgrade: installing ${current.name}@${latest.version}...`)
-              try {
-                const result = await runPluginUpgrade({
-                  packageName: current.name,
-                  version: latest.version,
-                  onLine: (line) => injectNotice(client, input.sessionID, line),
-                })
-
-                if (result.timedOut) {
-                  await injectNotice(client, input.sessionID, "OpenCube upgrade timed out after 120s.")
-                  await injectNotice(client, input.sessionID, `Run manually: ${result.command} ${result.args.join(" ")}`)
-                } else if (result.exitCode === 0) {
-                  await injectNotice(client, input.sessionID, "OpenCube upgrade finished. Please restart opencode to load the new version.")
-                } else {
-                  await injectNotice(client, input.sessionID, `OpenCube upgrade failed with exit code ${result.exitCode ?? "unknown"}${result.signal ? ` (${result.signal})` : ""}.`)
-                  await injectNotice(client, input.sessionID, `Run manually: ${result.command} ${result.args.join(" ")}`)
-                }
-              } catch (error: any) {
-                await injectNotice(client, input.sessionID, `OpenCube upgrade failed: ${error?.message || String(error)}`)
-                await injectNotice(client, input.sessionID, `Run manually: opencode plugin ${current.name}@${latest.version} --global --force`)
-              }
+              await injectNotice(client, input.sessionID, `Run manually: opencode plugin ${current.name}@${latest.version} --global --force`)
             }
           } catch {
             await injectNotice(client, input.sessionID, "OpenCube latest npm version: unknown")
