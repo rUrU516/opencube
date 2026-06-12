@@ -3,6 +3,9 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.id = void 0;
 exports.server = server;
 const electron_bridge_1 = require("./electron-bridge");
+const compare_1 = require("./features/update/compare");
+const registry_1 = require("./features/update/registry");
+const version_1 = require("./features/update/version");
 const COMMAND_HANDLED_SENTINEL = "__OPENCODE_PET_COMMAND_HANDLED__";
 function handled() {
     throw new Error(COMMAND_HANDLED_SENTINEL);
@@ -45,7 +48,7 @@ async function injectNotice(client, sessionID, text) {
 }
 exports.id = "opencube";
 async function server({ client }) {
-    const handledCommands = new Set(["pet", "pet_stop", "pet_restart", "pet_say_hello", "pet-drag-border", "pet_drag_border", "pet_test"]);
+    const handledCommands = new Set(["pet", "pet_stop", "pet_restart", "pet_say_hello", "pet_update", "pet_upgrade", "pet-drag-border", "pet_drag_border", "pet_test"]);
     return {
         config: async (cfg) => {
             cfg.command ??= {};
@@ -64,6 +67,14 @@ async function server({ client }) {
             cfg.command.pet_say_hello = {
                 template: "/pet_say_hello",
                 description: "Send a hello test event to OpenCube.",
+            };
+            cfg.command.pet_update = {
+                template: "/pet_update",
+                description: "Check npm for a newer OpenCube version.",
+            };
+            cfg.command.pet_upgrade = {
+                template: "/pet_upgrade",
+                description: "Alias for /pet_update.",
             };
             cfg.command["pet-drag-border"] = {
                 template: "/pet-drag-border",
@@ -108,6 +119,30 @@ async function server({ client }) {
                     sessionID: input.sessionID,
                 });
                 await injectNotice(client, input.sessionID, result ? "✦ OpenCube sent hello." : "☾ OpenCube is sleeping. Start it with /pet first.");
+            }
+            if (input.command === "pet_update" || input.command === "pet_upgrade") {
+                await injectNotice(client, input.sessionID, "↻ OpenCube: checking updates...");
+                try {
+                    const current = await (0, version_1.getCurrentVersion)();
+                    await injectNotice(client, input.sessionID, `OpenCube current version: v${current.version}`);
+                    try {
+                        const latest = await (0, registry_1.getLatestNpmVersion)(current.name);
+                        await injectNotice(client, input.sessionID, `OpenCube latest npm version: v${latest.version}`);
+                        const comparison = (0, compare_1.compareVersions)(current.version, latest.version);
+                        if (comparison === 0) {
+                            await injectNotice(client, input.sessionID, "OpenCube is up to date.");
+                        }
+                        if (comparison > 0) {
+                            await injectNotice(client, input.sessionID, "OpenCube is newer than npm latest. This looks like a local/dev build.");
+                        }
+                    }
+                    catch {
+                        await injectNotice(client, input.sessionID, "OpenCube latest npm version: unknown");
+                    }
+                }
+                catch {
+                    await injectNotice(client, input.sessionID, "OpenCube current version: unknown");
+                }
             }
             if (input.command === "pet-drag-border" || input.command === "pet_drag_border") {
                 const visible = parseDragBorderVisibility(input.arguments);
